@@ -160,4 +160,30 @@ public sealed class ContentAddressableStore : IPackageStore
             File.Copy(source, target, true);
         }
     }
+    
+    public async Task<string> GetIntegrityAsync(string name, string version, CancellationToken cancellationToken = default)
+    {
+        var packagePath = await GetPackagePathAsync(name, version, cancellationToken);
+        var integrityFile = Path.Combine(packagePath, ".integrity");
+        
+        if (File.Exists(integrityFile))
+        {
+            return await File.ReadAllTextAsync(integrityFile, cancellationToken);
+        }
+        
+        // Calculate integrity if not cached
+        var tarPath = Path.Combine(packagePath, "package.tgz");
+        if (File.Exists(tarPath))
+        {
+            using var stream = File.OpenRead(tarPath);
+            using var sha512 = System.Security.Cryptography.SHA512.Create();
+            var hash = await sha512.ComputeHashAsync(stream, cancellationToken);
+            var integrity = $"sha512-{Convert.ToBase64String(hash)}";
+            
+            await File.WriteAllTextAsync(integrityFile, integrity, cancellationToken);
+            return integrity;
+        }
+        
+        throw new InvalidOperationException($"Package {name}@{version} not found in store");
+    }
 }

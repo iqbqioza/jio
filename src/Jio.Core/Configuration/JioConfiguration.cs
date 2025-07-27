@@ -17,6 +17,7 @@ public sealed class JioConfiguration
     public bool UseHardLinks { get; set; } = true;
     public bool VerifyIntegrity { get; set; } = true;
     public TimeSpan HttpTimeout { get; set; } = TimeSpan.FromMinutes(5);
+    public int? MaxRetries { get; set; } = 3;
     
     private static string GetDefaultStoreDirectory()
     {

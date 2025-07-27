@@ -20,7 +20,14 @@ public sealed class DependencyResolver : IDependencyResolver
     
     public async Task<DependencyGraph> ResolveAsync(PackageManifest manifest, CancellationToken cancellationToken = default)
     {
-        var graph = new DependencyGraph();
+        var graph = new DependencyGraph
+        {
+            Name = manifest.Name,
+            Version = manifest.Version,
+            Dependencies = manifest.Dependencies ?? new Dictionary<string, string>(),
+            DevDependencies = manifest.DevDependencies ?? new Dictionary<string, string>(),
+            OptionalDependencies = manifest.OptionalDependencies ?? new Dictionary<string, string>()
+        };
         var tasks = new List<Task>();
         
         // Load workspaces if this is a workspace root
@@ -35,17 +42,23 @@ public sealed class DependencyResolver : IDependencyResolver
         }
         
         // Resolve direct dependencies
-        foreach (var (name, versionRange) in manifest.Dependencies)
+        if (manifest.Dependencies != null)
         {
-            graph.RootDependencies.Add(name);
-            tasks.Add(ResolvePackageAsync(name, versionRange, false, graph, cancellationToken));
+            foreach (var (name, versionRange) in manifest.Dependencies)
+            {
+                graph.RootDependencies.Add(name);
+                tasks.Add(ResolvePackageAsync(name, versionRange, false, graph, cancellationToken));
+            }
         }
         
         // Resolve dev dependencies
-        foreach (var (name, versionRange) in manifest.DevDependencies)
+        if (manifest.DevDependencies != null)
         {
-            graph.RootDependencies.Add(name);
-            tasks.Add(ResolvePackageAsync(name, versionRange, true, graph, cancellationToken));
+            foreach (var (name, versionRange) in manifest.DevDependencies)
+            {
+                graph.RootDependencies.Add(name);
+                tasks.Add(ResolvePackageAsync(name, versionRange, true, graph, cancellationToken));
+            }
         }
         
         await Task.WhenAll(tasks);

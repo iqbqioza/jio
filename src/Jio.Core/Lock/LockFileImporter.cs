@@ -73,6 +73,12 @@ public class LockFileImporter
     {
         var content = await File.ReadAllTextAsync(path, cancellationToken);
         var lockFile = new LockFile();
+        
+        // Check if it's Yarn Berry format
+        if (content.Contains("__metadata:") || content.Contains("languageName: node") || content.Contains("linkType: hard"))
+        {
+            return await ImportYarnBerryLockFileAsync(content, cancellationToken);
+        }
 
         // Parse yarn.lock format (simplified parser)
         var lines = content.Split('\n');
@@ -155,6 +161,176 @@ public class LockFileImporter
         }
 
         return lockFile;
+    }
+
+    private Task<LockFile> ImportYarnBerryLockFileAsync(string content, CancellationToken cancellationToken)
+    {
+        var lockFile = new LockFile();
+        var entries = new Dictionary<string, YarnBerryEntry>();
+
+        // Parse Yarn Berry format using simple parser
+        var lines = content.Split('\n');
+        string? currentPackage = null;
+        var currentEntry = new YarnBerryEntry();
+        var inDependencies = false;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            
+            // Skip comments and empty lines
+            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("#"))
+                continue;
+
+            // New package entry (starts with quote and contains @npm:)
+            if (line.StartsWith("\"") && line.Contains("@npm:"))
+            {
+                // Save previous entry
+                if (currentPackage != null && !string.IsNullOrEmpty(currentEntry.Version))
+                {
+                    entries[currentPackage] = currentEntry;
+                }
+
+                // Extract package name and version range
+                var match = Regex.Match(line, @"""(.+?)@npm:(.+?)"":");
+                if (match.Success)
+                {
+                    currentPackage = match.Groups[1].Value;
+                    currentEntry = new YarnBerryEntry
+                    {
+                        VersionRange = match.Groups[2].Value
+                    };
+                }
+                inDependencies = false;
+            }
+            else if (line.StartsWith("  ") && currentPackage != null)
+            {
+                var trimmed = line.Trim();
+                
+                if (trimmed.StartsWith("version:"))
+                {
+                    currentEntry.Version = ExtractYarnBerryValue(trimmed);
+                }
+                else if (trimmed.StartsWith("resolution:"))
+                {
+                    var resolutionValue = ExtractYarnBerryValue(trimmed);
+                    // Extract package name and version from resolution
+                    var resMatch = Regex.Match(resolutionValue, @"""(.+?)@npm:(.+?)""");
+                    if (resMatch.Success)
+                    {
+                        currentEntry.Resolution = resolutionValue;
+                        currentEntry.Version = resMatch.Groups[2].Value;
+                    }
+                }
+                else if (trimmed.StartsWith("checksum:"))
+                {
+                    currentEntry.Checksum = ExtractYarnBerryValue(trimmed);
+                }
+                else if (trimmed.StartsWith("languageName:"))
+                {
+                    currentEntry.LanguageName = ExtractYarnBerryValue(trimmed);
+                }
+                else if (trimmed.StartsWith("linkType:"))
+                {
+                    currentEntry.LinkType = ExtractYarnBerryValue(trimmed);
+                }
+                else if (trimmed.StartsWith("dependencies:"))
+                {
+                    inDependencies = true;
+                    currentEntry.Dependencies = new Dictionary<string, string>();
+                }
+                else if (inDependencies && trimmed.Contains(":") && !trimmed.EndsWith(":"))
+                {
+                    // Handle scoped packages with quotes
+                    if (trimmed.Contains("\""))
+                    {
+                        var match = Regex.Match(trimmed, @"""?([^""]+?)""?\s*:\s*(.+)");
+                        if (match.Success)
+                        {
+                            var depName = match.Groups[1].Value.Trim();
+                            var depVersion = match.Groups[2].Value.Trim();
+                            currentEntry.Dependencies![depName] = depVersion;
+                        }
+                    }
+                    else
+                    {
+                        var depParts = trimmed.Split(':', 2);
+                        if (depParts.Length == 2)
+                        {
+                            var depName = depParts[0].Trim();
+                            var depVersion = depParts[1].Trim();
+                            currentEntry.Dependencies![depName] = depVersion;
+                        }
+                    }
+                }
+                else if (!line.StartsWith("    "))
+                {
+                    // End of dependencies section
+                    inDependencies = false;
+                }
+            }
+        }
+
+        // Save last entry
+        if (currentPackage != null && !string.IsNullOrEmpty(currentEntry.Version))
+        {
+            entries[currentPackage] = currentEntry;
+        }
+
+        // Convert to LockFile format
+        foreach (var (packageSpec, entry) in entries)
+        {
+            if (!string.IsNullOrEmpty(entry.Version))
+            {
+                var packageKey = $"{packageSpec}@{entry.Version}";
+                
+                // Extract resolution URL
+                var resolved = "";
+                if (!string.IsNullOrEmpty(entry.Resolution))
+                {
+                    var resMatch = Regex.Match(entry.Resolution, @"""(.+?)#(.+?)""");
+                    if (resMatch.Success)
+                    {
+                        resolved = resMatch.Groups[1].Value;
+                    }
+                }
+
+                // Convert checksum to integrity format
+                var integrity = "";
+                if (!string.IsNullOrEmpty(entry.Checksum))
+                {
+                    // Yarn Berry uses different checksum format, convert to sha512
+                    integrity = $"sha512-{entry.Checksum}";
+                }
+
+                lockFile.Packages[packageKey] = new LockFilePackage
+                {
+                    Name = packageSpec,
+                    Version = entry.Version,
+                    Resolved = resolved,
+                    Integrity = integrity,
+                    Dependencies = entry.Dependencies ?? new Dictionary<string, string>()
+                };
+            }
+        }
+
+        return Task.FromResult(lockFile);
+    }
+
+    private string ExtractYarnBerryValue(string line)
+    {
+        var colonIndex = line.IndexOf(':');
+        if (colonIndex >= 0 && colonIndex < line.Length - 1)
+        {
+            var value = line.Substring(colonIndex + 1).Trim();
+            // Remove quotes if present
+            if (value.StartsWith("\"") && value.EndsWith("\""))
+            {
+                value = value.Substring(1, value.Length - 2);
+            }
+            return value;
+        }
+        return "";
     }
 
     private async Task<LockFile> ImportPnpmLockFileAsync(string path, CancellationToken cancellationToken)
@@ -245,6 +421,18 @@ public class YarnLockEntry
     public string Version { get; set; } = "";
     public string? Resolved { get; set; }
     public string? Integrity { get; set; }
+    public Dictionary<string, string>? Dependencies { get; set; }
+}
+
+// Yarn Berry (v2+) format
+public class YarnBerryEntry
+{
+    public string? VersionRange { get; set; }
+    public string Version { get; set; } = "";
+    public string? Resolution { get; set; }
+    public string? Checksum { get; set; }
+    public string? LanguageName { get; set; }
+    public string? LinkType { get; set; }
     public Dictionary<string, string>? Dependencies { get; set; }
 }
 

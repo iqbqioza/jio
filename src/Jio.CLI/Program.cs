@@ -7,6 +7,10 @@ using Jio.Core.Resolution;
 using Jio.Core.Storage;
 using Jio.Core.Http;
 using Jio.Core.Cache;
+using Jio.Core.Logging;
+using Jio.Core.Telemetry;
+using Jio.Core.Monitoring;
+using Jio.Core.Scripts;
 
 var services = new ServiceCollection();
 
@@ -15,11 +19,37 @@ services.AddSingleton<JioConfiguration>(sp =>
 {
     return JioConfiguration.CreateWithNpmrcAsync().GetAwaiter().GetResult();
 });
+
+// Logging and telemetry
+services.AddSingleton<ILogger>(sp =>
+{
+    var logLevel = Environment.GetEnvironmentVariable("JIO_LOG_LEVEL") switch
+    {
+        "DEBUG" => LogLevel.Debug,
+        "INFO" => LogLevel.Info,
+        "WARN" or "WARNING" => LogLevel.Warning,
+        "ERROR" => LogLevel.Error,
+        _ => LogLevel.Info
+    };
+    
+    var enableStructuredLogging = Environment.GetEnvironmentVariable("JIO_STRUCTURED_LOGGING") == "true";
+    return new ConsoleLogger(logLevel, enableStructuredLogging);
+});
+
+services.AddSingleton<ITelemetryService>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger>();
+    var enableTelemetry = Environment.GetEnvironmentVariable("JIO_TELEMETRY_ENABLED") != "false";
+    return new TelemetryService(logger, enableTelemetry);
+});
+
 services.AddSingleton<HttpClient>(sp =>
 {
     var config = sp.GetRequiredService<JioConfiguration>();
     return ProxyAwareHttpClientFactory.CreateHttpClient(config);
 });
+
+services.AddSingleton<IHealthCheckService, HealthCheckService>();
 services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
 services.AddSingleton<IPackageCache, FileSystemPackageCache>();
@@ -38,7 +68,9 @@ services.AddScoped<ICommandHandler<PublishCommand>, PublishCommandHandler>();
 services.AddScoped<ICommandHandler<SearchCommand>, SearchCommandHandler>();
 services.AddScoped<ICommandHandler<ViewCommand>, ViewCommandHandler>();
 services.AddScoped<ICommandHandler<DlxCommand>, DlxCommandHandler>();
+services.AddScoped<ICommandHandler<CiCommand>, CiCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
+services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
 
 var serviceProvider = services.BuildServiceProvider();
 
@@ -525,6 +557,18 @@ whyCommand.SetHandler(async (string package) =>
 }, whyPackageArgument);
 rootCommand.AddCommand(whyCommand);
 
+// CI command
+var ciCommand = new Command("ci", "Clean install from lock file");
+var productionOption = new Option<bool>("--production", "Install production dependencies only");
+ciCommand.AddOption(productionOption);
+ciCommand.SetHandler(async (bool production) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<CiCommand>>();
+    var exitCode = await handler.ExecuteAsync(new CiCommand { Production = production });
+    Environment.Exit(exitCode);
+}, productionOption);
+rootCommand.AddCommand(ciCommand);
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
@@ -532,7 +576,7 @@ if (args.Length > 0)
     var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
                                 "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
                                 "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", 
-                                "dlx", "cache", "config", "why", "--help", "-h", "--version" };
+                                "dlx", "cache", "config", "why", "ci", "--help", "-h", "--version" };
     
     if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
     {

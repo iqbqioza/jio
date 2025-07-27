@@ -51,7 +51,16 @@ public static class ProxyAwareHttpClientFactory
             };
         }
         
-        var client = new HttpClient(handler)
+        // Add retry handler
+        var retryHandler = new HttpClientRetryHandler(
+            maxRetries: configuration.MaxRetries ?? 3,
+            baseDelayMs: 1000,
+            maxDelayMs: 30000)
+        {
+            InnerHandler = handler
+        };
+        
+        var client = new HttpClient(retryHandler)
         {
             Timeout = configuration.HttpTimeout
         };

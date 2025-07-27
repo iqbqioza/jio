@@ -13,6 +13,9 @@ public sealed class LockFile
 
 public sealed class LockFilePackage
 {
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+    
     [JsonPropertyName("version")]
     public required string Version { get; init; }
     

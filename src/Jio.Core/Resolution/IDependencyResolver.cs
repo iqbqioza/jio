@@ -9,6 +9,11 @@ public interface IDependencyResolver
 
 public sealed class DependencyGraph
 {
+    public string? Name { get; init; }
+    public string? Version { get; init; }
+    public Dictionary<string, string> Dependencies { get; init; } = new();
+    public Dictionary<string, string> DevDependencies { get; init; } = new();
+    public Dictionary<string, string> OptionalDependencies { get; init; } = new();
     public Dictionary<string, ResolvedPackage> Packages { get; init; } = new();
     public HashSet<string> RootDependencies { get; init; } = new();
 }

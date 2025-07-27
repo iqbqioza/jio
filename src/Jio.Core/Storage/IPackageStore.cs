@@ -8,4 +8,5 @@ public interface IPackageStore
     Task LinkPackageAsync(string name, string version, string targetPath, CancellationToken cancellationToken = default);
     Task<long> GetStoreSizeAsync(CancellationToken cancellationToken = default);
     Task CleanupAsync(CancellationToken cancellationToken = default);
+    Task<string> GetIntegrityAsync(string name, string version, CancellationToken cancellationToken = default);
 }

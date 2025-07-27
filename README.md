@@ -8,9 +8,9 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Storage Efficient**: Uses content-addressable storage with hard links to minimize disk usage
 - **Secure**: Built-in integrity verification and security audit capabilities
 - **Cross-Platform**: Self-contained binaries for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64)
-- **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn, and pnpm commands
+- **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn (v1 & v2+/Berry), and pnpm commands
 - **Workspace/Monorepo Support**: Native support for workspaces with topological ordering and `workspace:` protocol
-- **Lock File Compatibility**: Automatically imports package-lock.json, yarn.lock, or pnpm-lock.yaml
+- **Lock File Compatibility**: Automatically imports and exports package-lock.json, yarn.lock (v1 & Berry), and pnpm-lock.yaml
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
 - **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx)
@@ -342,6 +342,24 @@ Example:
 jio why express  # Show why express is installed
 ```
 
+#### `jio ci`
+Clean install from lock file (npm ci equivalent)
+
+Options:
+- `--production`: Install production dependencies only
+
+Example:
+```bash
+jio ci              # Clean install all dependencies
+jio ci --production # Install only production dependencies
+```
+
+This command:
+- Removes existing node_modules directory
+- Installs packages exactly as specified in lock file
+- Faster than regular install for CI/CD environments
+- Ensures reproducible builds
+
 ## Architecture
 
 jio uses a content-addressable store similar to pnpm, storing packages once and creating hard links to `node_modules`. This approach significantly reduces disk usage when working with multiple projects.
@@ -351,8 +369,11 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Content-Addressable Store**: Packages stored by content hash in `~/.jio/store`
 - **Hard Links**: Efficient linking from store to `node_modules` (falls back to copying on Windows)
 - **Parallel Downloads**: Concurrent package downloads with configurable limits
-- **Lock File**: `jio-lock.json` for reproducible installs (auto-imports npm/yarn/pnpm lock files)
+- **Lock File**: `jio-lock.json` for reproducible installs (auto-imports and exports npm/yarn/pnpm lock files)
 - **Integrity Verification**: All packages are verified using SHA-512 hashes
+- **Lifecycle Scripts**: Full support for npm lifecycle scripts (preinstall, postinstall, prepare, etc.)
+- **HTTP Retry**: Automatic retry with exponential backoff for network failures
+- **Production-Ready Logging**: Structured logging with JSON output for monitoring
 - **.npmrc Support**: Reads configuration from project, user, and global .npmrc files
 - **Scoped Packages**: Support for @scope/package with per-scope registries
 - **Authentication**: Bearer token authentication for private registries
@@ -502,6 +523,22 @@ Then use workspace commands:
 jio install              # Install all workspace dependencies
 jio run -r build         # Run build in all workspaces
 jio run -r --parallel test  # Run tests in parallel
+```
+
+## Environment Variables
+
+jio supports the following environment variables:
+
+- `JIO_LOG_LEVEL`: Set logging level (DEBUG, INFO, WARN, ERROR). Default: INFO
+- `JIO_STRUCTURED_LOGGING`: Enable JSON structured logging (true/false). Default: false
+- `JIO_TELEMETRY_ENABLED`: Enable telemetry collection (true/false). Default: true
+- `NPM_TOKEN`: Authentication token for private registries
+
+Example:
+```bash
+export JIO_LOG_LEVEL=DEBUG
+export JIO_STRUCTURED_LOGGING=true
+jio install
 ```
 
 ## Development

@@ -5,6 +5,9 @@ using Jio.Core.Resolution;
 using Jio.Core.Storage;
 using Jio.Core.Workspaces;
 using Jio.Core.Lock;
+using Jio.Core.Scripts;
+using Jio.Core.Logging;
+using Jio.Core.Telemetry;
 
 namespace Jio.Core.Commands;
 
@@ -22,16 +25,24 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
     private readonly IPackageRegistry _registry;
     private readonly IDependencyResolver _resolver;
     private readonly IPackageStore _store;
+    private readonly ILifecycleScriptRunner _scriptRunner;
+    private readonly ILogger _logger;
+    private readonly ITelemetryService _telemetry;
     private readonly JsonSerializerOptions _jsonOptions;
     
     public InstallCommandHandler(
         IPackageRegistry registry,
         IDependencyResolver resolver,
-        IPackageStore store)
+        IPackageStore store,
+        ILogger logger,
+        ITelemetryService telemetry)
     {
         _registry = registry;
         _resolver = resolver;
         _store = store;
+        _logger = logger;
+        _telemetry = telemetry;
+        _scriptRunner = new LifecycleScriptRunner(logger);
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -109,11 +120,30 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         
         await Task.WhenAll(tasks);
         
+        // Run preinstall scripts
+        var currentDir = Directory.GetCurrentDirectory();
+        await _scriptRunner.RunScriptAsync("preinstall", currentDir, cancellationToken);
+        
         // Create node_modules structure
         await CreateNodeModulesAsync(graph, cancellationToken);
         
+        // Run install scripts for each installed package
+        var nodeModules = Path.Combine(currentDir, "node_modules");
+        foreach (var package in graph.Packages.Values)
+        {
+            var packageDir = Path.Combine(nodeModules, package.Name);
+            await _scriptRunner.RunScriptAsync("install", packageDir, cancellationToken);
+            await _scriptRunner.RunScriptAsync("postinstall", packageDir, cancellationToken);
+        }
+        
         // Write lock file
         await WriteLockFileAsync(graph, cancellationToken);
+        
+        // Run postinstall scripts
+        await _scriptRunner.RunScriptAsync("install", currentDir, cancellationToken);
+        await _scriptRunner.RunScriptAsync("postinstall", currentDir, cancellationToken);
+        await _scriptRunner.RunScriptAsync("prepublish", currentDir, cancellationToken);
+        await _scriptRunner.RunScriptAsync("prepare", currentDir, cancellationToken);
         
         Console.WriteLine($"Installed {graph.Packages.Count} packages");
         return 0;

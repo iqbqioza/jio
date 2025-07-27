@@ -25,7 +25,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Lock File Compatibility**: Automatically imports and exports package-lock.json, yarn.lock (v1 & Berry), and pnpm-lock.yaml
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
-- **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx)
+- **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx) - requires Node.js
 - **Robust Error Handling**: Graceful handling of corrupted packages and network failures
 
 ## Installation
@@ -172,17 +172,23 @@ Options:
 
 Example:
 ```bash
-jio run build
-jio run test -- --watch
+jio run build              # Run build script with Node.js
+jio run test -- --watch    # Run test script with watch mode
 jio run -r build           # Run build in all workspaces
 jio run -r --parallel test # Run tests in parallel across workspaces
+
+**Note**: Script execution requires Node.js to be installed. Jio will automatically detect Node.js from your PATH, nvm, or common installation locations.
 ```
 
 #### `jio test`
 Run the test script (shortcut for `jio run test`)
 
+**Note**: Requires Node.js for script execution.
+
 #### `jio start`
 Run the start script (shortcut for `jio run start`)
+
+**Note**: Requires Node.js for script execution.
 
 #### `jio list [pattern]`
 List installed packages (alias: `ls`)
@@ -321,6 +327,8 @@ jio view express dependencies # View only dependencies
 
 #### `jio dlx <package>`
 Download and execute a package temporarily (like npx/yarn dlx/pnpm dlx)
+
+**Note**: Requires Node.js to be installed on your system.
 
 Arguments:
 - `package`: Package to execute with optional version

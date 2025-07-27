@@ -4,6 +4,9 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Suppress trimming warnings for JSON serialization until full JsonSerializerContext migration -->
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <NoWarn>$(NoWarn);IL2026;IL2067;IL2070</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

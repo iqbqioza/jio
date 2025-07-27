@@ -118,8 +118,8 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
             FileName = shell,
             Arguments = shellArgs,
             UseShellExecute = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             RedirectStandardInput = false,
             WorkingDirectory = Directory.GetCurrentDirectory()
         };
@@ -133,14 +133,43 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
             processInfo.Environment["PATH"] = $"{nodeModulesBin}{separator}{currentPath}";
         }
         
-        using var process = Process.Start(processInfo);
-        if (process == null)
+        try
         {
-            throw new InvalidOperationException("Failed to start process");
+            using var process = Process.Start(processInfo);
+            if (process == null)
+            {
+                throw new InvalidOperationException("Failed to start process");
+            }
+            
+            // Read and display output in real-time
+            var outputTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+                {
+                    Console.WriteLine(line);
+                }
+            });
+            
+            var errorTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardError.ReadLineAsync()) != null)
+                {
+                    Console.Error.WriteLine(line);
+                }
+            });
+            
+            await process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(outputTask, errorTask);
+            
+            return process.ExitCode;
         }
-        
-        await process.WaitForExitAsync(cancellationToken);
-        return process.ExitCode;
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to execute script: {ex.Message}");
+            return 1;
+        }
     }
     
     private async Task<int> ExecuteRecursiveAsync(RunCommand command, CancellationToken cancellationToken)

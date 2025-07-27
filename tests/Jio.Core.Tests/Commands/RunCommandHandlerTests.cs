@@ -5,13 +5,21 @@ using Jio.Core.Models;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Command Tests")]
 public class RunCommandHandlerTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly RunCommandHandler _handler;
+    private readonly TextWriter _originalOut;
+    private readonly TextWriter _originalError;
+    private readonly string _originalDirectory;
 
     public RunCommandHandlerTests()
     {
+        _originalOut = Console.Out;
+        _originalError = Console.Error;
+        _originalDirectory = Directory.GetCurrentDirectory();
+        
         _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
         Directory.SetCurrentDirectory(_testDirectory);
@@ -161,10 +169,10 @@ public class RunCommandHandlerTests : IDisposable
     {
         try
         {
-            // Reset console output
-            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()));
+            Console.SetOut(_originalOut);
+            Console.SetError(_originalError);
             
-            Directory.SetCurrentDirectory(Path.GetTempPath());
+            Directory.SetCurrentDirectory(_originalDirectory);
             if (Directory.Exists(_testDirectory))
             {
                 Directory.Delete(_testDirectory, true);

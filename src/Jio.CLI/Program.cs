@@ -37,6 +37,7 @@ services.AddScoped<ICommandHandler<LinkCommand>, LinkCommandHandler>();
 services.AddScoped<ICommandHandler<PublishCommand>, PublishCommandHandler>();
 services.AddScoped<ICommandHandler<SearchCommand>, SearchCommandHandler>();
 services.AddScoped<ICommandHandler<ViewCommand>, ViewCommandHandler>();
+services.AddScoped<ICommandHandler<DlxCommand>, DlxCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 
 var serviceProvider = services.BuildServiceProvider();
@@ -193,12 +194,43 @@ rootCommand.AddCommand(updateCommand);
 
 // Add yarn-style aliases
 var addCommand = new Command("add", "Install packages (yarn compatibility)");
-addCommand.SetHandler(async (string? package) =>
+var addPackageArgument = new Argument<string[]>("packages", () => Array.Empty<string>(), "Packages to install") { Arity = ArgumentArity.ZeroOrMore };
+var addDevOption = new Option<bool>("-D", "Save as dev dependency");
+var addExactOption = new Option<bool>("-E", "Save exact version");
+var addOptionalOption = new Option<bool>("-O", "Save as optional dependency");
+addCommand.AddArgument(addPackageArgument);
+addCommand.AddOption(addDevOption);
+addCommand.AddOption(addExactOption);
+addCommand.AddOption(addOptionalOption);
+addCommand.SetHandler(async (string[] packages, bool dev, bool exact, bool optional) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<InstallCommand>>();
-    var exitCode = await handler.ExecuteAsync(new InstallCommand { Package = package });
-    Environment.Exit(exitCode);
-}, packageArgument);
+    if (packages.Length == 0)
+    {
+        // No packages specified, install all
+        var exitCode = await handler.ExecuteAsync(new InstallCommand());
+        Environment.Exit(exitCode);
+    }
+    else
+    {
+        // Install each package
+        foreach (var package in packages)
+        {
+            var exitCode = await handler.ExecuteAsync(new InstallCommand 
+            { 
+                Package = package,
+                SaveDev = dev,
+                SaveExact = exact,
+                SaveOptional = optional
+            });
+            if (exitCode != 0)
+            {
+                Environment.Exit(exitCode);
+            }
+        }
+        Environment.Exit(0);
+    }
+}, addPackageArgument, addDevOption, addExactOption, addOptionalOption);
 rootCommand.AddCommand(addCommand);
 
 // List command
@@ -403,13 +435,104 @@ viewCommand.SetHandler(async (string package, string? field, bool json) =>
 }, viewPackageArgument, viewFieldArgument, viewJsonOption);
 rootCommand.AddCommand(viewCommand);
 
+// Dlx command (npx/yarn dlx/pnpm dlx equivalent)
+var dlxCommand = new Command("dlx", "Download and execute a package temporarily");
+var dlxPackageArgument = new Argument<string>("package", "Package to execute");
+var dlxArgsOption = new Option<string[]>("--", "Arguments to pass to the package") { AllowMultipleArgumentsPerToken = true };
+var dlxQuietOption = new Option<bool>("-q", "Suppress output");
+var dlxRegistryOption = new Option<string>("--registry", "Registry URL");
+dlxCommand.AddArgument(dlxPackageArgument);
+dlxCommand.AddOption(dlxArgsOption);
+dlxCommand.AddOption(dlxQuietOption);
+dlxCommand.AddOption(dlxRegistryOption);
+dlxCommand.SetHandler(async (string package, string[] args, bool quiet, string? registry) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<DlxCommand>>();
+    var exitCode = await handler.ExecuteAsync(new DlxCommand 
+    { 
+        Package = package,
+        Arguments = args?.ToList() ?? [],
+        Quiet = quiet,
+        Registry = registry
+    });
+    Environment.Exit(exitCode);
+}, dlxPackageArgument, dlxArgsOption, dlxQuietOption, dlxRegistryOption);
+rootCommand.AddCommand(dlxCommand);
+
+// Cache command
+var cacheCommand = new Command("cache", "Manage the package cache");
+var cacheCleanCommand = new Command("clean", "Clean the package cache");
+cacheCleanCommand.SetHandler(() =>
+{
+    var cacheDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".jio", "cache"
+    );
+    if (Directory.Exists(cacheDir))
+    {
+        Directory.Delete(cacheDir, true);
+        Console.WriteLine("Cache cleaned successfully.");
+    }
+    else
+    {
+        Console.WriteLine("Cache is already clean.");
+    }
+    Environment.Exit(0);
+});
+cacheCommand.AddCommand(cacheCleanCommand);
+rootCommand.AddCommand(cacheCommand);
+
+// Config command
+var configCommand = new Command("config", "Manage configuration");
+var configGetCommand = new Command("get", "Get a configuration value");
+var configKeyArgument = new Argument<string>("key", "Configuration key");
+configGetCommand.AddArgument(configKeyArgument);
+configGetCommand.SetHandler((string key) =>
+{
+    var config = serviceProvider.GetRequiredService<JioConfiguration>();
+    var value = key switch
+    {
+        "registry" => config.Registry,
+        "proxy" => config.Proxy,
+        "https-proxy" => config.HttpsProxy,
+        "strict-ssl" => config.StrictSsl.ToString(),
+        "maxsockets" => config.MaxConcurrentDownloads.ToString(),
+        _ => null
+    };
+    if (value != null)
+    {
+        Console.WriteLine(value);
+    }
+    Environment.Exit(value != null ? 0 : 1);
+}, configKeyArgument);
+configCommand.AddCommand(configGetCommand);
+rootCommand.AddCommand(configCommand);
+
+// Why command (pnpm compatibility)
+var whyCommand = new Command("why", "Show why a package is installed");
+var whyPackageArgument = new Argument<string>("package", "Package name to check");
+whyCommand.AddArgument(whyPackageArgument);
+whyCommand.SetHandler(async (string package) =>
+{
+    // For now, redirect to list with pattern
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<ListCommand>>();
+    var exitCode = await handler.ExecuteAsync(new ListCommand 
+    { 
+        Pattern = package,
+        Depth = int.MaxValue
+    });
+    Environment.Exit(exitCode);
+}, whyPackageArgument);
+rootCommand.AddCommand(whyCommand);
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
 {
     var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
                                 "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
-                                "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", "--help", "-h", "--version" };
+                                "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", 
+                                "dlx", "cache", "config", "why", "--help", "-h", "--version" };
     
     if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
     {

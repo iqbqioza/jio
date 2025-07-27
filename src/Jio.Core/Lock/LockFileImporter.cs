@@ -163,6 +163,7 @@ public class LockFileImporter
         
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
             .Build();
 
         var pnpmLock = deserializer.Deserialize<PnpmLockFile>(yaml)
@@ -175,12 +176,15 @@ public class LockFileImporter
         {
             foreach (var (key, value) in pnpmLock.Packages)
             {
-                // Extract package name and version from pnpm key format
-                var match = Regex.Match(key, @"^(.+?)@(.+)$");
-                if (match.Success)
+                // pnpm uses /package@version format
+                if (key.StartsWith("/"))
                 {
-                    var name = match.Groups[1].Value;
-                    var version = match.Groups[2].Value;
+                    var packageKey = key.Substring(1); // Remove leading /
+                    var lastAtIndex = packageKey.LastIndexOf('@');
+                    if (lastAtIndex > 0)
+                    {
+                        var name = packageKey.Substring(0, lastAtIndex);
+                        var version = packageKey.Substring(lastAtIndex + 1);
                     
                     lockFile.Packages[$"{name}@{version}"] = new LockFilePackage
                     {
@@ -190,6 +194,7 @@ public class LockFileImporter
                         Dependencies = value.Dependencies ?? new Dictionary<string, string>(),
                         Dev = value.Dev ?? false
                     };
+                    }
                 }
             }
         }
@@ -246,9 +251,10 @@ public class YarnLockEntry
 // PNPM Lock File format
 public class PnpmLockFile
 {
-    public int? LockfileVersion { get; set; }
+    public string? LockfileVersion { get; set; }
     public Dictionary<string, PnpmPackageEntry>? Packages { get; set; }
     public Dictionary<string, PnpmImporter>? Importers { get; set; }
+    public Dictionary<string, PnpmDependencySpec>? Dependencies { get; set; }
 }
 
 public class PnpmPackageEntry

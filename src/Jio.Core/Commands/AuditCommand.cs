@@ -237,10 +237,13 @@ public class AuditCommandHandler : ICommandHandler<AuditCommand>
         var fixCount = 0;
         var packagesToUpdate = new Dictionary<string, string>();
 
+        Console.WriteLine($"[DEBUG] ApplyFixes called with {vulnerabilities.Count} vulnerabilities");
         foreach (var vuln in vulnerabilities)
         {
+            Console.WriteLine($"[DEBUG] Processing vulnerability for {vuln.PackageName}, patched versions: {vuln.PatchedVersions}");
             // Find the minimum patched version
             var patchedVersion = await FindMinimumPatchedVersion(vuln.PackageName, vuln.PatchedVersions);
+            Console.WriteLine($"[DEBUG] FindMinimumPatchedVersion returned: {patchedVersion}");
             if (!string.IsNullOrEmpty(patchedVersion))
             {
                 packagesToUpdate[vuln.PackageName] = patchedVersion;
@@ -276,12 +279,35 @@ public class AuditCommandHandler : ICommandHandler<AuditCommand>
     {
         try
         {
+            Console.WriteLine($"[DEBUG] Finding patched version for {packageName}, patched: {patchedVersions}");
             var metadata = await _registry.GetPackageMetadataAsync(packageName);
             var availableVersions = metadata.Versions.Keys.OrderBy(v => v).ToList();
+            Console.WriteLine($"[DEBUG] Available versions: {string.Join(", ", availableVersions)}");
             
             // Parse patched versions range and find minimum matching version
-            // This is simplified - in reality would need proper semver range parsing
-            return availableVersions.FirstOrDefault(v => !string.IsNullOrEmpty(v));
+            // For now, we'll return the patched version if it's a simple version string
+            // In a real implementation, this would parse semver ranges like ">=1.2.0"
+            if (patchedVersions.StartsWith(">="))
+            {
+                var minVersion = patchedVersions.Substring(2).Trim();
+                // For simple version comparison, just return the minimum version if it exists
+                // In production, this should use proper semver comparison
+                if (availableVersions.Contains(minVersion))
+                {
+                    return minVersion;
+                }
+                // Find first version that is >= minVersion (simplified comparison)
+                return availableVersions.FirstOrDefault(v => v.CompareTo(minVersion) >= 0) ?? minVersion;
+            }
+            
+            // If it's a direct version, return it if available
+            if (availableVersions.Contains(patchedVersions))
+            {
+                return patchedVersions;
+            }
+            
+            // Default to the patched version string
+            return patchedVersions;
         }
         catch
         {
@@ -305,11 +331,24 @@ public class VulnerabilityReport
 
 public class Advisory
 {
+    [System.Text.Json.Serialization.JsonPropertyName("severity")]
     public string Severity { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("title")]
     public string Title { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("url")]
     public string Url { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("vulnerable_versions")]
     public string VulnerableVersions { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("patched_versions")]
     public string PatchedVersions { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("cwe")]
     public string CWE { get; set; } = "";
+    
+    [System.Text.Json.Serialization.JsonPropertyName("cve")]
     public string CVE { get; set; } = "";
 }

@@ -10,15 +10,23 @@ using Moq.Protected;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Command Tests")]
 public class AuditCommandHandlerTests : IDisposable
 {
     private readonly Mock<IPackageRegistry> _mockRegistry;
     private readonly Mock<HttpMessageHandler> _mockHttpHandler;
     private readonly HttpClient _httpClient;
     private readonly string _testDirectory;
+    private readonly TextWriter _originalOut;
+    private readonly TextWriter _originalError;
+    private readonly string _originalDirectory;
 
     public AuditCommandHandlerTests()
     {
+        _originalOut = Console.Out;
+        _originalError = Console.Error;
+        _originalDirectory = Directory.GetCurrentDirectory();
+        
         _mockRegistry = new Mock<IPackageRegistry>();
         _mockHttpHandler = new Mock<HttpMessageHandler>();
         _httpClient = new HttpClient(_mockHttpHandler.Object);
@@ -30,6 +38,8 @@ public class AuditCommandHandlerTests : IDisposable
     public async Task ExecuteAsync_NoPackageJson_ReturnsError()
     {
         // Arrange
+        Directory.SetCurrentDirectory(_testDirectory);
+        // Create handler AFTER changing directory so it captures the correct _projectRoot
         var handler = new AuditCommandHandler(_mockRegistry.Object, _httpClient);
         var command = new AuditCommand();
 
@@ -272,7 +282,14 @@ public class AuditCommandHandlerTests : IDisposable
     {
         try
         {
-            Directory.Delete(_testDirectory, true);
+            Console.SetOut(_originalOut);
+            Console.SetError(_originalError);
+            Directory.SetCurrentDirectory(_originalDirectory);
+            
+            if (Directory.Exists(_testDirectory))
+            {
+                Directory.Delete(_testDirectory, true);
+            }
         }
         catch { }
     }

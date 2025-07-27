@@ -5,13 +5,21 @@ using Jio.Core.Models;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Command Tests")]
 public class InitCommandHandlerTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly InitCommandHandler _handler;
+    private readonly TextWriter _originalOut;
+    private readonly TextWriter _originalError;
+    private readonly string _originalDirectory;
 
     public InitCommandHandlerTests()
     {
+        _originalOut = Console.Out;
+        _originalError = Console.Error;
+        _originalDirectory = Directory.GetCurrentDirectory();
+        
         _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
         Directory.SetCurrentDirectory(_testDirectory);
@@ -69,6 +77,8 @@ public class InitCommandHandlerTests : IDisposable
         result.Should().Be(0);
         
         var packageJsonPath = Path.Combine(_testDirectory, "package.json");
+        File.Exists(packageJsonPath).Should().BeTrue();
+        
         var json = await File.ReadAllTextAsync(packageJsonPath);
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -127,7 +137,10 @@ public class InitCommandHandlerTests : IDisposable
     {
         try
         {
-            Directory.SetCurrentDirectory(Path.GetTempPath());
+            Console.SetOut(_originalOut);
+            Console.SetError(_originalError);
+            
+            Directory.SetCurrentDirectory(_originalDirectory);
             if (Directory.Exists(_testDirectory))
             {
                 Directory.Delete(_testDirectory, true);

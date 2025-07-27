@@ -9,10 +9,11 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Secure**: Built-in integrity verification and security audit capabilities
 - **Cross-Platform**: Self-contained binaries for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64)
 - **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn, and pnpm commands
-- **Workspace/Monorepo Support**: Native support for workspaces with topological ordering
+- **Workspace/Monorepo Support**: Native support for workspaces with topological ordering and `workspace:` protocol
 - **Lock File Compatibility**: Automatically imports package-lock.json, yarn.lock, or pnpm-lock.yaml
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
+- **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx)
 
 ## Installation
 
@@ -292,6 +293,55 @@ jio view express@4.18.2       # View specific version
 jio view express dependencies # View only dependencies
 ```
 
+#### `jio dlx <package>`
+Download and execute a package temporarily (like npx/yarn dlx/pnpm dlx)
+
+Arguments:
+- `package`: Package to execute with optional version
+- `--`: Arguments to pass to the package
+
+Options:
+- `-q`: Suppress output
+- `--registry <url>`: Registry URL
+
+Example:
+```bash
+jio dlx create-react-app my-app  # Create a new React app
+jio dlx eslint -- --fix src/     # Run eslint without installing
+jio dlx typescript@5.0.0 -- --version  # Run specific TypeScript version
+```
+
+#### `jio cache clean`
+Clean the package cache
+
+Example:
+```bash
+jio cache clean  # Remove all cached packages
+```
+
+#### `jio config get <key>`
+Get configuration values
+
+Arguments:
+- `key`: Configuration key (registry, proxy, https-proxy, strict-ssl, maxsockets)
+
+Example:
+```bash
+jio config get registry  # Get current registry URL
+jio config get proxy     # Get proxy configuration
+```
+
+#### `jio why <package>`
+Show why a package is installed (pnpm compatibility)
+
+Arguments:
+- `package`: Package name to check
+
+Example:
+```bash
+jio why express  # Show why express is installed
+```
+
 ## Architecture
 
 jio uses a content-addressable store similar to pnpm, storing packages once and creating hard links to `node_modules`. This approach significantly reduces disk usage when working with multiple projects.
@@ -426,6 +476,26 @@ For monorepo/workspace support, add a `workspaces` field to your root `package.j
   ]
 }
 ```
+
+#### Using workspace: protocol
+
+You can reference workspace packages using the `workspace:` protocol:
+
+```json
+{
+  "name": "@myapp/web",
+  "dependencies": {
+    "@myapp/core": "workspace:*",
+    "@myapp/utils": "workspace:^1.0.0"
+  }
+}
+```
+
+Supported workspace versions:
+- `workspace:*` - Any version from the workspace
+- `workspace:^` - Compatible version from the workspace
+- `workspace:~` - Approximately equivalent version from the workspace
+- `workspace:1.2.3` - Exact version from the workspace
 
 Then use workspace commands:
 ```bash

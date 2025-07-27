@@ -88,7 +88,36 @@ services.AddScoped<InstallCommandHandler>();
 services.AddSingleton<IPatchManager, PatchManager>();
 services.AddSingleton<ISignatureVerifier, SignatureVerifier>();
 services.AddSingleton<INodeJsHelper, NodeJsHelper>();
-services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
+
+// Script execution configuration
+var enableHighPerformance = Environment.GetEnvironmentVariable("JIO_HIGH_PERFORMANCE_SCRIPTS") == "true";
+var maxScriptConcurrency = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_SCRIPT_CONCURRENCY"), out var concurrency) 
+    ? concurrency : 10;
+var maxScriptQueueSize = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_SCRIPT_QUEUE_SIZE"), out var queueSize) 
+    ? queueSize : 100;
+var maxRequestsPerMinute = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_REQUESTS_PER_MINUTE"), out var rpm) 
+    ? rpm : 300;
+
+if (enableHighPerformance)
+{
+    services.AddSingleton<IScriptExecutionPool>(sp =>
+    {
+        var logger = sp.GetRequiredService<ILogger>();
+        var nodeJsHelper = sp.GetRequiredService<INodeJsHelper>();
+        return new ScriptExecutionPool(logger, nodeJsHelper, maxScriptConcurrency, maxScriptQueueSize);
+    });
+    
+    services.AddSingleton<ILifecycleScriptRunner>(sp =>
+    {
+        var logger = sp.GetRequiredService<ILogger>();
+        var executionPool = sp.GetRequiredService<IScriptExecutionPool>();
+        return new HighPerformanceLifecycleScriptRunner(logger, executionPool, maxRequestsPerMinute);
+    });
+}
+else
+{
+    services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
+}
 services.AddSingleton<IGitDependencyResolver>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger>();
@@ -844,4 +873,39 @@ if (args.Length > 0)
     }
 }
 
-return await rootCommand.InvokeAsync(args);
+// Set up graceful shutdown
+var exitCode = 0;
+var appLifetime = new CancellationTokenSource();
+
+Console.CancelKeyPress += (sender, e) =>
+{
+    e.Cancel = true;
+    appLifetime.Cancel();
+    
+    // Dispose of the execution pool if it exists
+    if (enableHighPerformance && serviceProvider.GetService<IScriptExecutionPool>() is IDisposable pool)
+    {
+        pool.Dispose();
+    }
+};
+
+try
+{
+    exitCode = await rootCommand.InvokeAsync(args);
+}
+finally
+{
+    // Clean up resources
+    if (enableHighPerformance && serviceProvider.GetService<IScriptExecutionPool>() is IDisposable pool)
+    {
+        pool.Dispose();
+    }
+    
+    // Dispose service provider
+    if (serviceProvider is IDisposable sp)
+    {
+        sp.Dispose();
+    }
+}
+
+return exitCode;

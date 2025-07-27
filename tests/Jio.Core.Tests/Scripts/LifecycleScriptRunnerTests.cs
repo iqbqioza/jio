@@ -30,7 +30,19 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
             });
         
         _nodeJsHelperMock.Setup(n => n.ExecuteNpmScriptAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ProcessResult { ExitCode = 0, StandardOutput = "", StandardError = "" });
+            .ReturnsAsync((string script, string? workingDir, CancellationToken ct) =>
+            {
+                // Return appropriate exit codes based on script content
+                if (script.Contains("exit 1"))
+                {
+                    return new ProcessResult { ExitCode = 1, StandardOutput = "", StandardError = "Script failed" };
+                }
+                if (script.Contains("nonexistent-command"))
+                {
+                    return new ProcessResult { ExitCode = 127, StandardOutput = "", StandardError = "Command not found" };
+                }
+                return new ProcessResult { ExitCode = 0, StandardOutput = "", StandardError = "" };
+            });
         
         _runner = new LifecycleScriptRunner(_loggerMock.Object, _nodeJsHelperMock.Object);
         _tempDirectory = Path.Combine(Path.GetTempPath(), "jio-script-tests", Guid.NewGuid().ToString());

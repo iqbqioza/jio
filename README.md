@@ -773,12 +773,32 @@ jio supports the following environment variables:
 - `JIO_TELEMETRY_ENABLED`: Enable telemetry collection (true/false). Default: true
 - `NPM_TOKEN`: Authentication token for private registries
 
+### High-Performance Script Execution
+
+For environments with high script execution demands, jio offers a high-performance mode:
+
+- `JIO_HIGH_PERFORMANCE_SCRIPTS`: Enable high-performance script execution pool (true/false). Default: false
+- `JIO_MAX_SCRIPT_CONCURRENCY`: Maximum concurrent script executions. Default: 10
+- `JIO_MAX_SCRIPT_QUEUE_SIZE`: Maximum queued script executions. Default: 100
+- `JIO_MAX_REQUESTS_PER_MINUTE`: Rate limit for script executions. Default: 300
+
 Example:
 ```bash
 export JIO_LOG_LEVEL=DEBUG
 export JIO_STRUCTURED_LOGGING=true
+export JIO_HIGH_PERFORMANCE_SCRIPTS=true
+export JIO_MAX_SCRIPT_CONCURRENCY=20
+export JIO_MAX_REQUESTS_PER_MINUTE=600
 jio install
 ```
+
+The high-performance mode provides:
+- **Connection pooling**: Reuses Node.js processes for better performance
+- **Rate limiting**: Prevents overwhelming the system with too many requests
+- **Resource monitoring**: Tracks memory usage and execution statistics
+- **Priority execution**: Critical scripts (install, build) get higher priority
+- **Graceful timeouts**: Scripts have configurable timeouts based on type
+- **Queue management**: Handles bursts of requests with intelligent queuing
 
 ## Development
 

@@ -68,7 +68,7 @@ public sealed class PackageManifest
     public Dictionary<string, string>? Resolutions { get; init; }
     
     [JsonPropertyName("patchedDependencies")]
-    public Dictionary<string, string>? PatchedDependencies { get; init; }
+    public Dictionary<string, string>? PatchedDependencies { get; set; }
     
     public async Task SaveAsync(string path)
     {

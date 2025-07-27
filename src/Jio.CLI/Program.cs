@@ -13,6 +13,7 @@ using Jio.Core.Monitoring;
 using Jio.Core.Scripts;
 using Jio.Core.Dependencies;
 using Jio.Core.Patches;
+using Jio.Core.Security;
 
 var services = new ServiceCollection();
 
@@ -643,8 +644,7 @@ versionCommand.AddOption(preidOption);
 versionCommand.AddOption(noGitTagOption);
 versionCommand.AddOption(messageOption);
 versionCommand.SetHandler(async (string? newVersion, bool major, bool minor, bool patch, 
-    bool premajor, bool preminor, bool prepatch, bool prerelease, 
-    string? preid, bool noGitTag, string? message) =>
+    bool premajor, bool preminor, bool prepatch, bool prerelease) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<VersionCommand>>();
     var exitCode = await handler.ExecuteAsync(new VersionCommand 
@@ -657,14 +657,13 @@ versionCommand.SetHandler(async (string? newVersion, bool major, bool minor, boo
         Preminor = preminor,
         Prepatch = prepatch,
         Prerelease = prerelease,
-        Preid = preid,
-        NoGitTagVersion = noGitTag,
-        Message = message
+        Preid = null,
+        NoGitTagVersion = false,
+        Message = null
     });
     Environment.Exit(exitCode);
 }, newVersionArg, majorOption, minorOption, patchOption, 
-   premajorOption, preminorOption, prepatchOption, prereleaseOption,
-   preidOption, noGitTagOption, messageOption);
+   premajorOption, preminorOption, prepatchOption, prereleaseOption);
 rootCommand.AddCommand(versionCommand);
 
 // Prune command

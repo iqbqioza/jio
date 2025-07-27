@@ -3,9 +3,11 @@ using Jio.Core.Models;
 using Jio.Core.Registry;
 using Jio.Core.Resolution;
 using Moq;
+using Xunit;
 
 namespace Jio.Core.Tests.Resolution;
 
+[Collection("Resolution Tests")]
 public class DependencyResolverTests
 {
     private readonly Mock<IPackageRegistry> _registryMock;
@@ -40,8 +42,8 @@ public class DependencyResolverTests
 
         // Assert
         graph.Packages.Should().HaveCount(2);
-        graph.RootDependencies.Should().Contain("express");
-        graph.RootDependencies.Should().Contain("lodash");
+        graph.RootDependencies.Should().ContainKey("express");
+        graph.RootDependencies.Should().ContainKey("lodash");
         
         var expressPackage = graph.Packages["express@4.18.2"];
         expressPackage.Name.Should().Be("express");

@@ -153,6 +153,7 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         await WriteLockFileAsync(graph, cancellationToken);
         
         // Create zero-installs archive if enabled
+        var config = new JioConfiguration(); // Default configuration
         var zeroInstallsManager = new ZeroInstallsManager(_logger, _store, config);
         await zeroInstallsManager.CreateZeroInstallsArchiveAsync(graph, cancellationToken);
         
@@ -293,7 +294,7 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         }
     }
     
-    private async Task CreateNestedNodeModulesAsync(
+    private Task CreateNestedNodeModulesAsync(
         ResolvedPackage package, 
         DependencyGraph graph, 
         Dictionary<string, string> packageLocations,
@@ -301,7 +302,7 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
     {
         if (package.Dependencies == null || !package.Dependencies.Any())
         {
-            return;
+            return Task.CompletedTask;
         }
         
         var packagePath = packageLocations[$"{package.Name}@{package.Version}"];
@@ -322,16 +323,24 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
                 }
             }
         }
+        
+        return Task.CompletedTask;
     }
     
     private async Task WriteLockFileAsync(DependencyGraph graph, CancellationToken cancellationToken)
     {
         var lockFile = new LockFile
         {
-            Dependencies = graph.Packages.ToDictionary(
+            Name = graph.Name,
+            Version = graph.Version ?? "1.0.0",
+            Dependencies = graph.Dependencies,
+            DevDependencies = graph.DevDependencies,
+            OptionalDependencies = graph.OptionalDependencies,
+            Packages = graph.Packages.ToDictionary(
                 kvp => kvp.Key,
                 kvp => new LockFilePackage
                 {
+                    Name = kvp.Value.Name,
                     Version = kvp.Value.Version,
                     Resolved = kvp.Value.Resolved,
                     Integrity = kvp.Value.Integrity,

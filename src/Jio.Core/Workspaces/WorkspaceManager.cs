@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Jio.Core.Logging;
 using Jio.Core.Models;
 
 namespace Jio.Core.Workspaces;
@@ -7,10 +8,16 @@ public class WorkspaceManager
 {
     private readonly string _rootPath;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly ILogger _logger;
 
-    public WorkspaceManager(string rootPath)
+    public WorkspaceManager(string rootPath) : this(rootPath, new ConsoleLogger(LogLevel.Error))
+    {
+    }
+
+    public WorkspaceManager(string rootPath, ILogger logger)
     {
         _rootPath = rootPath;
+        _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -20,6 +27,8 @@ public class WorkspaceManager
 
     public async Task<List<WorkspaceInfo>> GetWorkspacesAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         var rootManifestPath = Path.Combine(_rootPath, "package.json");
         if (!File.Exists(rootManifestPath))
         {
@@ -39,24 +48,34 @@ public class WorkspaceManager
 
         foreach (var pattern in patterns)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var matchedPaths = await FindMatchingPathsAsync(pattern, cancellationToken);
             foreach (var path in matchedPaths)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var workspaceManifestPath = Path.Combine(path, "package.json");
                 if (File.Exists(workspaceManifestPath))
                 {
-                    var workspaceJson = await File.ReadAllTextAsync(workspaceManifestPath, cancellationToken);
-                    var workspaceManifest = JsonSerializer.Deserialize<PackageManifest>(workspaceJson, _jsonOptions);
-                    
-                    if (workspaceManifest != null && !string.IsNullOrEmpty(workspaceManifest.Name))
+                    try
                     {
-                        workspaces.Add(new WorkspaceInfo
+                        var workspaceJson = await File.ReadAllTextAsync(workspaceManifestPath, cancellationToken);
+                        var workspaceManifest = JsonSerializer.Deserialize<PackageManifest>(workspaceJson, _jsonOptions);
+                        
+                        if (workspaceManifest != null && !string.IsNullOrEmpty(workspaceManifest.Name))
                         {
-                            Name = workspaceManifest.Name,
-                            Path = path,
-                            RelativePath = Path.GetRelativePath(_rootPath, path),
-                            Manifest = workspaceManifest
-                        });
+                            workspaces.Add(new WorkspaceInfo
+                            {
+                                Name = workspaceManifest.Name,
+                                Path = path,
+                                RelativePath = Path.GetRelativePath(_rootPath, path),
+                                Manifest = workspaceManifest
+                            });
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        // Skip corrupted or invalid package.json files
+                        _logger.LogDebug("Skipping invalid package.json at {Path}: {Message}", workspaceManifestPath, ex.Message);
                     }
                 }
             }
@@ -67,6 +86,8 @@ public class WorkspaceManager
 
     public async Task<Dictionary<string, List<string>>> GetWorkspaceDependencyGraphAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         var workspaces = await GetWorkspacesAsync(cancellationToken);
         var graph = new Dictionary<string, List<string>>();
 
@@ -106,6 +127,8 @@ public class WorkspaceManager
 
     public async Task<List<WorkspaceInfo>> GetTopologicalOrderAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         var workspaces = await GetWorkspacesAsync(cancellationToken);
         var graph = await GetWorkspaceDependencyGraphAsync(cancellationToken);
         

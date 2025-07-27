@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Jio.Core.Commands;
 using Jio.Core.Models;
+using Xunit;
 
 namespace Jio.Core.Tests.Commands;
 
@@ -13,17 +14,14 @@ public class UninstallCommandHandlerTests : IDisposable
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly TextWriter _originalOut;
     private readonly TextWriter _originalError;
-    private readonly string _originalDirectory;
 
     public UninstallCommandHandlerTests()
     {
         _originalOut = Console.Out;
         _originalError = Console.Error;
-        _originalDirectory = Directory.GetCurrentDirectory();
         
-        _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        _testDirectory = Path.Combine(Path.GetTempPath(), "jio-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
-        Directory.SetCurrentDirectory(_testDirectory);
         _handler = new UninstallCommandHandler();
         _jsonOptions = new JsonSerializerOptions
         {
@@ -50,9 +48,8 @@ public class UninstallCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new UninstallCommand { Package = "express" };
-
-        // Act
-        var result = await _handler.ExecuteAsync(command);
+        
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         result.Should().Be(0);
@@ -81,9 +78,8 @@ public class UninstallCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new UninstallCommand { Package = "typescript" };
-
-        // Act
-        var result = await _handler.ExecuteAsync(command);
+        
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         result.Should().Be(0);
@@ -111,15 +107,23 @@ public class UninstallCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new UninstallCommand { Package = "nonexistent" };
-
-        // Act
         var output = new StringWriter();
-        Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        
+        try
+        {
+            Console.SetOut(output);
+            
+            // Act
+            var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
-        // Assert
-        result.Should().Be(1);
-        output.ToString().Should().Contain("Package 'nonexistent' is not in dependencies");
+            // Assert
+            result.Should().Be(1);
+            output.ToString().Should().Contain("Package 'nonexistent' is not in dependencies");
+        }
+        finally
+        {
+            Console.SetOut(_originalOut);
+        }
     }
 
     [Fact]
@@ -144,9 +148,8 @@ public class UninstallCommandHandlerTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(expressPath, "index.js"), "// express");
         
         var command = new UninstallCommand { Package = "express" };
-
-        // Act
-        var result = await _handler.ExecuteAsync(command);
+        
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         result.Should().Be(0);
@@ -189,9 +192,8 @@ public class UninstallCommandHandlerTests : IDisposable
         await CreateLockFileAsync(lockFile);
         
         var command = new UninstallCommand { Package = "express" };
-
-        // Act
-        await _handler.ExecuteAsync(command);
+        
+        await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         var updatedLockJson = await File.ReadAllTextAsync(Path.Combine(_testDirectory, "jio-lock.json"));
@@ -221,6 +223,20 @@ public class UninstallCommandHandlerTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_testDirectory, "jio-lock.json"), json);
     }
 
+    private async Task<T> ExecuteWithCurrentDirectoryAsync<T>(Func<Task<T>> action)
+    {
+        var currentDir = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
+            return await action();
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
+    }
+
     public void Dispose()
     {
         try
@@ -228,7 +244,6 @@ public class UninstallCommandHandlerTests : IDisposable
             Console.SetOut(_originalOut);
             Console.SetError(_originalError);
             
-            Directory.SetCurrentDirectory(_originalDirectory);
             if (Directory.Exists(_testDirectory))
             {
                 Directory.Delete(_testDirectory, true);

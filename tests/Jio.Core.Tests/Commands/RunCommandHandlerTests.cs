@@ -5,24 +5,20 @@ using Jio.Core.Models;
 
 namespace Jio.Core.Tests.Commands;
 
-[Collection("Command Tests")]
 public class RunCommandHandlerTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly RunCommandHandler _handler;
     private readonly TextWriter _originalOut;
     private readonly TextWriter _originalError;
-    private readonly string _originalDirectory;
 
     public RunCommandHandlerTests()
     {
         _originalOut = Console.Out;
         _originalError = Console.Error;
-        _originalDirectory = Directory.GetCurrentDirectory();
         
-        _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        _testDirectory = Path.Combine(Path.GetTempPath(), "jio-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
-        Directory.SetCurrentDirectory(_testDirectory);
         _handler = new RunCommandHandler();
     }
 
@@ -44,11 +40,11 @@ public class RunCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new RunCommand { Script = null };
-
+        
         // Act
         var output = new StringWriter();
         Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
         
         // Assert
         result.Should().Be(0);
@@ -75,11 +71,11 @@ public class RunCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new RunCommand { Script = "nonexistent" };
-
+        
         // Act
         var output = new StringWriter();
         Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
         
         // Assert
         result.Should().Be(1);
@@ -99,11 +95,11 @@ public class RunCommandHandlerTests : IDisposable
         await CreatePackageJsonAsync(manifest);
         
         var command = new RunCommand { Script = null };
-
+        
         // Act
         var output = new StringWriter();
         Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
         
         // Assert
         result.Should().Be(0);
@@ -115,11 +111,11 @@ public class RunCommandHandlerTests : IDisposable
     {
         // Arrange
         var command = new RunCommand { Script = "test" };
-
+        
         // Act
         var output = new StringWriter();
         Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
         
         // Assert
         result.Should().Be(1);
@@ -136,22 +132,22 @@ public class RunCommandHandlerTests : IDisposable
             Version = "1.0.0",
             Scripts = new Dictionary<string, string>
             {
-                ["test"] = "echo \"Running tests\""
+                ["test"] = "echo test"
             }
         };
         await CreatePackageJsonAsync(manifest);
         
         var command = new RunCommand { Script = "test" };
-
+        
         // Act
         var output = new StringWriter();
         Console.SetOut(output);
-        await _handler.ExecuteAsync(command);
+        await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
         
         // Assert
         var outputText = output.ToString();
         outputText.Should().Contain("> test-package@1.0.0 test");
-        outputText.Should().Contain("> echo \"Running tests\"");
+        outputText.Should().Contain("> echo test");
     }
 
     private async Task CreatePackageJsonAsync(PackageManifest manifest)
@@ -165,6 +161,20 @@ public class RunCommandHandlerTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(_testDirectory, "package.json"), json);
     }
 
+    private async Task<T> ExecuteWithCurrentDirectoryAsync<T>(Func<Task<T>> action)
+    {
+        var currentDir = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
+            return await action();
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
+    }
+
     public void Dispose()
     {
         try
@@ -172,7 +182,6 @@ public class RunCommandHandlerTests : IDisposable
             Console.SetOut(_originalOut);
             Console.SetError(_originalError);
             
-            Directory.SetCurrentDirectory(_originalDirectory);
             if (Directory.Exists(_testDirectory))
             {
                 Directory.Delete(_testDirectory, true);

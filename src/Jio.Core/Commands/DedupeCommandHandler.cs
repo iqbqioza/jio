@@ -30,6 +30,7 @@ public sealed class DedupeCommandHandler : ICommandHandler<DedupeCommand>
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var directory = Directory.GetCurrentDirectory();
             var packageJsonPath = Path.Combine(directory, "package.json");
             var lockFilePath = Path.Combine(directory, "jio-lock.json");
@@ -131,6 +132,11 @@ public sealed class DedupeCommandHandler : ICommandHandler<DedupeCommand>
 
             return 0;
         }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("Operation was cancelled");
+            return 1;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
@@ -147,19 +153,40 @@ public sealed class DedupeCommandHandler : ICommandHandler<DedupeCommand>
         // Traverse node_modules to find all packages
         await TraverseNodeModulesAsync(nodeModulesPath, nodeModulesPath, packageVersions, specificPackage, cancellationToken);
         
-        // Filter to only packages with multiple versions
+        // Filter to only packages with multiple locations
         var duplicates = new Dictionary<string, List<PackageVersion>>(StringComparer.OrdinalIgnoreCase);
         
         foreach (var (packageName, versions) in packageVersions)
         {
-            if (versions.Count > 1)
+            var packageVersionList = new List<PackageVersion>();
+            
+            foreach (var (version, locations) in versions)
             {
-                duplicates[packageName] = versions.Select(v => new PackageVersion
+                if (locations.Count > 1)
                 {
-                    Version = v.Key,
-                    Locations = v.Value,
-                    Size = v.Value.Sum(loc => GetDirectorySize(loc))
-                }).ToList();
+                    // Same version in multiple locations
+                    packageVersionList.Add(new PackageVersion
+                    {
+                        Version = version,
+                        Locations = locations,
+                        Size = locations.Sum(loc => GetDirectorySize(loc))
+                    });
+                }
+                else if (versions.Count > 1)
+                {
+                    // Different versions
+                    packageVersionList.Add(new PackageVersion
+                    {
+                        Version = version,
+                        Locations = locations,
+                        Size = locations.Sum(loc => GetDirectorySize(loc))
+                    });
+                }
+            }
+            
+            if (packageVersionList.Count > 0)
+            {
+                duplicates[packageName] = packageVersionList;
             }
         }
         

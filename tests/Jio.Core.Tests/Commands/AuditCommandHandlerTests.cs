@@ -266,16 +266,24 @@ public class AuditCommandHandlerTests : IDisposable
         var command = new AuditCommand { Json = true };
 
         using var output = new StringWriter();
-        Console.SetOut(output);
+        var originalOut = Console.Out;
+        try
+        {
+            Console.SetOut(output);
 
-        // Act
-        await handler.ExecuteAsync(command);
+            // Act
+            await handler.ExecuteAsync(command);
 
-        // Assert
-        var jsonOutput = output.ToString();
-        Assert.Contains("\"vulnerabilities\":", jsonOutput);
-        Assert.Contains("\"metadata\":", jsonOutput);
-        Assert.Contains("\"advisories\":", jsonOutput);
+            // Assert
+            var jsonOutput = output.ToString();
+            Assert.Contains("\"vulnerabilities\":", jsonOutput);
+            Assert.Contains("\"metadata\":", jsonOutput);
+            Assert.Contains("\"advisories\":", jsonOutput);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     public void Dispose()

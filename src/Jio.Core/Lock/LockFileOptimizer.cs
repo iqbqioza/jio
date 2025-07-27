@@ -34,11 +34,11 @@ public class LockFileOptimizer : ILockFileOptimizer
         var optimizedLockFile = new LockFile
         {
             Version = lockFile.Version,
-            Dependencies = new Dictionary<string, LockFilePackage>()
+            Packages = new Dictionary<string, LockFilePackage>()
         };
 
         // Sort dependencies alphabetically for consistency
-        var sortedDependencies = lockFile.Dependencies?
+        var sortedDependencies = lockFile.Packages?
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
             .ToList() ?? new List<KeyValuePair<string, LockFilePackage>>();
 
@@ -46,7 +46,7 @@ public class LockFileOptimizer : ILockFileOptimizer
         {
             // Optimize individual package entries
             var optimizedPackage = OptimizePackageEntry(package);
-            optimizedLockFile.Dependencies[name] = optimizedPackage;
+            optimizedLockFile.Packages[name] = optimizedPackage;
         }
 
         // Remove duplicate entries and consolidate versions
@@ -55,7 +55,7 @@ public class LockFileOptimizer : ILockFileOptimizer
         // Compress dependency trees
         optimizedLockFile = await CompressDependencyTreesAsync(optimizedLockFile, cancellationToken);
 
-        _logger.LogDebug($"Lock file optimized: {lockFile.Dependencies?.Count ?? 0} -> {optimizedLockFile.Dependencies?.Count ?? 0} entries");
+        _logger.LogDebug($"Lock file optimized: {lockFile.Packages?.Count ?? 0} -> {optimizedLockFile.Packages?.Count ?? 0} entries");
 
         return optimizedLockFile;
     }
@@ -91,6 +91,7 @@ public class LockFileOptimizer : ILockFileOptimizer
 
     public async Task<LockFile> RemoveUnusedDependenciesAsync(LockFile lockFile, PackageManifest manifest, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
         var usedDependencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var toProcess = new Queue<string>();
 
@@ -127,7 +128,7 @@ public class LockFileOptimizer : ILockFileOptimizer
         {
             var current = toProcess.Dequeue();
             
-            if (lockFile.Dependencies?.TryGetValue(current, out var package) == true)
+            if (lockFile.Packages?.TryGetValue(current, out var package) == true)
             {
                 if (package.Dependencies != null)
                 {
@@ -159,21 +160,21 @@ public class LockFileOptimizer : ILockFileOptimizer
         var optimizedLockFile = new LockFile
         {
             Version = lockFile.Version,
-            Dependencies = new Dictionary<string, LockFilePackage>()
+            Packages = new Dictionary<string, LockFilePackage>()
         };
 
-        if (lockFile.Dependencies != null)
+        if (lockFile.Packages != null)
         {
-            foreach (var (name, package) in lockFile.Dependencies)
+            foreach (var (name, package) in lockFile.Packages)
             {
                 if (usedDependencies.Contains(name))
                 {
-                    optimizedLockFile.Dependencies[name] = package;
+                    optimizedLockFile.Packages[name] = package;
                 }
             }
         }
 
-        var removedCount = (lockFile.Dependencies?.Count ?? 0) - optimizedLockFile.Dependencies.Count;
+        var removedCount = (lockFile.Packages?.Count ?? 0) - optimizedLockFile.Packages.Count;
         _logger.LogDebug($"Removed {removedCount} unused dependencies from lock file");
 
         return optimizedLockFile;
@@ -220,8 +221,9 @@ public class LockFileOptimizer : ILockFileOptimizer
 
     private async Task<LockFile> ConsolidateVersionsAsync(LockFile lockFile, CancellationToken cancellationToken)
     {
+        await Task.CompletedTask;
         // Group packages by name and consolidate versions where possible
-        var packageGroups = lockFile.Dependencies?
+        var packageGroups = lockFile.Packages?
             .GroupBy(kvp => GetPackageBaseName(kvp.Key))
             .ToList() ?? new List<IGrouping<string, KeyValuePair<string, LockFilePackage>>>();
 
@@ -249,20 +251,21 @@ public class LockFileOptimizer : ILockFileOptimizer
         return new LockFile
         {
             Version = lockFile.Version,
-            Dependencies = consolidatedDependencies
+            Packages = consolidatedDependencies
         };
     }
 
     private async Task<LockFile> CompressDependencyTreesAsync(LockFile lockFile, CancellationToken cancellationToken)
     {
+        await Task.CompletedTask;
         // Remove redundant dependency declarations where a package is already available at a higher level
         var flattened = new Dictionary<string, LockFilePackage>();
 
-        if (lockFile.Dependencies != null)
+        if (lockFile.Packages != null)
         {
-            foreach (var (name, package) in lockFile.Dependencies)
+            foreach (var (name, package) in lockFile.Packages)
             {
-                var compressedPackage = CompressPackageDependencies(package, lockFile.Dependencies);
+                var compressedPackage = CompressPackageDependencies(package, lockFile.Packages);
                 flattened[name] = compressedPackage;
             }
         }
@@ -270,7 +273,7 @@ public class LockFileOptimizer : ILockFileOptimizer
         return new LockFile
         {
             Version = lockFile.Version,
-            Dependencies = flattened
+            Packages = flattened
         };
     }
 

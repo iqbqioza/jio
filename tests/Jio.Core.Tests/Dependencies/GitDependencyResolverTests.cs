@@ -5,7 +5,7 @@ using Xunit;
 
 namespace Jio.Core.Tests.Dependencies;
 
-public class GitDependencyResolverTests
+public class GitDependencyResolverTests : IDisposable
 {
     private readonly Mock<ILogger> _mockLogger;
     private readonly string _testCacheDir;
@@ -67,9 +67,25 @@ public class GitDependencyResolverTests
 
     public void Dispose()
     {
-        if (Directory.Exists(_testCacheDir))
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+    
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            Directory.Delete(_testCacheDir, recursive: true);
+            if (Directory.Exists(_testCacheDir))
+            {
+                try
+                {
+                    Directory.Delete(_testCacheDir, recursive: true);
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
+            }
         }
     }
 }

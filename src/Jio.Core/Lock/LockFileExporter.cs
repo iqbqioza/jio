@@ -151,10 +151,16 @@ public class LockFileExporter : ILockFileExporter
                 sb.AppendLine($"  version \"{package.Version}\"");
                 sb.AppendLine($"  resolved \"{package.Resolved}\"");
                 
-                // Convert SHA512 to Yarn format (remove sha512- prefix)
-                var integrity = package.Integrity.StartsWith("sha512-") 
-                    ? package.Integrity.Substring(7) 
-                    : package.Integrity;
+                // Convert integrity to Yarn format (remove algorithm prefix)
+                var integrity = package.Integrity;
+                if (package.Integrity.StartsWith("sha512-"))
+                {
+                    integrity = package.Integrity.Substring(7);
+                }
+                else if (package.Integrity.StartsWith("sha1-"))
+                {
+                    integrity = package.Integrity.Substring(5);
+                }
                 sb.AppendLine($"  integrity {integrity}");
 
                 if (package.Dependencies.Any())
@@ -353,7 +359,7 @@ public class LockFileExporter : ILockFileExporter
         {
             version = "1.0",
             name = graph.Name,
-            graph.Version,
+            packageVersion = graph.Version,
             dependencies = graph.Dependencies,
             devDependencies = graph.DevDependencies,
             optionalDependencies = graph.OptionalDependencies,

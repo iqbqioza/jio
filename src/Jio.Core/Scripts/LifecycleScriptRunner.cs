@@ -41,6 +41,8 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
 
     public async Task<bool> RunScriptAsync(string scriptName, string workingDirectory, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         var packageJsonPath = Path.Combine(workingDirectory, "package.json");
         if (!File.Exists(packageJsonPath))
         {
@@ -48,35 +50,45 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
             return true; // Not an error if no package.json
         }
 
-        var content = await File.ReadAllTextAsync(packageJsonPath, cancellationToken);
-        var manifest = JsonSerializer.Deserialize<PackageManifest>(content, _jsonOptions);
-        
-        if (manifest?.Scripts == null)
+        try
         {
-            _logger.LogDebug("No scripts defined in package.json");
-            return true;
-        }
+            var content = await File.ReadAllTextAsync(packageJsonPath, cancellationToken);
+            var manifest = JsonSerializer.Deserialize<PackageManifest>(content, _jsonOptions);
+            
+            if (manifest?.Scripts == null)
+            {
+                _logger.LogDebug("No scripts defined in package.json");
+                return true;
+            }
 
-        // Check if script exists
-        if (!manifest.Scripts.TryGetValue(scriptName, out var scriptCommand))
+            // Check if script exists
+            if (!manifest.Scripts.TryGetValue(scriptName, out var scriptCommand))
+            {
+                _logger.LogDebug("Script '{0}' not found", scriptName);
+                return true; // Not an error if script doesn't exist
+            }
+
+            _logger.LogInfo("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
+            Console.WriteLine($"> {scriptName}");
+            Console.WriteLine($"> {scriptCommand}");
+
+            // Prepare environment
+            var env = PrepareEnvironment(workingDirectory, manifest);
+            
+            // Execute script
+            return await ExecuteScriptAsync(scriptCommand, workingDirectory, env, cancellationToken);
+        }
+        catch (JsonException ex)
         {
-            _logger.LogDebug("Script '{0}' not found", scriptName);
-            return true; // Not an error if script doesn't exist
+            _logger.LogError(ex, "Failed to parse package.json");
+            return false;
         }
-
-        _logger.LogInfo("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
-        Console.WriteLine($"> {scriptName}");
-        Console.WriteLine($"> {scriptCommand}");
-
-        // Prepare environment
-        var env = PrepareEnvironment(workingDirectory, manifest);
-        
-        // Execute script
-        return await ExecuteScriptAsync(scriptCommand, workingDirectory, env, cancellationToken);
     }
 
     public async Task<bool> RunLifecycleScriptsAsync(string lifecycle, string workingDirectory, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         if (!LifecycleEvents.TryGetValue(lifecycle, out var scripts))
         {
             _logger.LogDebug("No lifecycle events defined for '{0}'", lifecycle);

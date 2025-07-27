@@ -48,7 +48,7 @@ public sealed class PatchCommandHandler : ICommandHandler<PatchCommand>
 
             if (command.Create)
             {
-                return await CreatePatchAsync(command, packagePath, cancellationToken);
+                return await CreatePatchAsync(command.Package, packagePath, cancellationToken);
             }
             else
             {
@@ -210,7 +210,7 @@ public sealed class PatchCommandHandler : ICommandHandler<PatchCommand>
         // Add patchedDependencies section if it doesn't exist
         if (manifest.PatchedDependencies == null)
         {
-            manifest = manifest with { PatchedDependencies = new Dictionary<string, string>() };
+            manifest.PatchedDependencies = new Dictionary<string, string>();
         }
         
         manifest.PatchedDependencies[package] = Path.GetRelativePath(Directory.GetCurrentDirectory(), patchFile);

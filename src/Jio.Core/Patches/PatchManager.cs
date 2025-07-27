@@ -34,15 +34,15 @@ public class PatchManager : IPatchManager
             
             // Initialize git repo
             await RunGitCommandAsync(tempGitDir, "init", cancellationToken);
-            await RunGitCommandAsync(tempGitDir, "config", "user.email", "jio@example.com", cancellationToken);
-            await RunGitCommandAsync(tempGitDir, "config", "user.name", "jio", cancellationToken);
+            await RunGitCommandAsync(tempGitDir, "config user.email jio@example.com", cancellationToken);
+            await RunGitCommandAsync(tempGitDir, "config user.name jio", cancellationToken);
             
             // Copy original files
             await CopyDirectoryAsync(originalPath, tempGitDir, cancellationToken);
             
             // Add and commit original
-            await RunGitCommandAsync(tempGitDir, "add", ".", cancellationToken);
-            await RunGitCommandAsync(tempGitDir, "commit", "-m", "original", cancellationToken);
+            await RunGitCommandAsync(tempGitDir, "add .", cancellationToken);
+            await RunGitCommandAsync(tempGitDir, "commit -m \"original\"", cancellationToken);
             
             // Remove all files
             foreach (var file in Directory.GetFiles(tempGitDir))
@@ -61,7 +61,7 @@ public class PatchManager : IPatchManager
             await CopyDirectoryAsync(modifiedPath, tempGitDir, cancellationToken);
             
             // Create diff
-            var diffOutput = await RunGitCommandWithOutputAsync(tempGitDir, "diff", "--no-index", "--no-prefix", "HEAD", cancellationToken);
+            var diffOutput = await RunGitCommandWithOutputAsync(tempGitDir, "diff --no-index --no-prefix HEAD", cancellationToken);
             
             // Write patch file
             await File.WriteAllTextAsync(patchFile, diffOutput, cancellationToken);
@@ -88,13 +88,14 @@ public class PatchManager : IPatchManager
         }
         
         // Apply patch using git apply
-        await RunGitCommandAsync(targetPath, "apply", patchFile, cancellationToken);
+        await RunGitCommandAsync(targetPath, $"apply \"{patchFile}\"", cancellationToken);
         
         _logger.LogDebug($"Applied patch {patchFile} to {targetPath}");
     }
 
     public async Task<string?> GetExistingPatchAsync(string packageName, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
         if (!Directory.Exists(_patchesDirectory))
         {
             return null;
@@ -149,17 +150,12 @@ public class PatchManager : IPatchManager
         }
     }
 
-    private async Task RunGitCommandAsync(string workingDirectory, params string[] args)
-    {
-        await RunGitCommandAsync(workingDirectory, args, CancellationToken.None);
-    }
-
-    private async Task RunGitCommandAsync(string workingDirectory, string[] args, CancellationToken cancellationToken)
+    private async Task RunGitCommandAsync(string workingDirectory, string command, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = "git",
-            Arguments = string.Join(" ", args),
+            Arguments = command,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -182,12 +178,12 @@ public class PatchManager : IPatchManager
         }
     }
 
-    private async Task<string> RunGitCommandWithOutputAsync(string workingDirectory, params string[] args)
+    private async Task<string> RunGitCommandWithOutputAsync(string workingDirectory, string command, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = "git",
-            Arguments = string.Join(" ", args),
+            Arguments = command,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

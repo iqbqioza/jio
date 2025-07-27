@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Jio.Core.Configuration;
-using Jio.Core.Http;
 using Jio.Core.Logging;
 
 namespace Jio.Core.Security;
@@ -10,15 +9,15 @@ namespace Jio.Core.Security;
 public class SignatureVerifier : ISignatureVerifier
 {
     private readonly ILogger _logger;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly HttpClient _httpClient;
     private readonly JioConfiguration _configuration;
     private readonly string _trustedKeysPath;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public SignatureVerifier(ILogger logger, IHttpClientFactory httpClientFactory, JioConfiguration configuration)
+    public SignatureVerifier(ILogger logger, HttpClient httpClient, JioConfiguration configuration)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
+        _httpClient = httpClient;
         _configuration = configuration;
         _trustedKeysPath = Path.Combine(_configuration.CacheDirectory, "trusted-keys.json");
         _jsonOptions = new JsonSerializerOptions
@@ -31,6 +30,8 @@ public class SignatureVerifier : ISignatureVerifier
 
     public async Task<bool> VerifyPackageSignatureAsync(string packageName, string version, Stream packageStream, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         if (!_configuration.VerifySignatures)
         {
             return true; // Skip verification if disabled
@@ -71,19 +72,19 @@ public class SignatureVerifier : ISignatureVerifier
 
     public async Task<SignatureInfo?> GetPackageSignatureAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         try
         {
-            using var httpClient = _httpClientFactory.CreateClient();
-            
             // Construct signature URL (npm registry format)
             var signatureUrl = $"{_configuration.Registry.TrimEnd('/')}/{packageName}/-/{packageName}-{version}.tgz.sig";
             
-            var response = await httpClient.GetAsync(signatureUrl, cancellationToken);
+            var response = await _httpClient.GetAsync(signatureUrl, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 // Try alternative signature endpoint
                 var altSignatureUrl = $"{_configuration.Registry.TrimEnd('/')}/{packageName}/{version}/signature";
-                response = await httpClient.GetAsync(altSignatureUrl, cancellationToken);
+                response = await _httpClient.GetAsync(altSignatureUrl, cancellationToken);
                 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -103,6 +104,8 @@ public class SignatureVerifier : ISignatureVerifier
 
     public async Task<bool> VerifySignatureAsync(Stream dataStream, string signature, string publicKey, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        
         try
         {
             // Convert base64 signature to bytes

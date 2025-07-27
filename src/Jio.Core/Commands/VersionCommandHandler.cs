@@ -84,11 +84,11 @@ public sealed class VersionCommandHandler : ICommandHandler<VersionCommand>
                 var tagMessage = command.Message ?? $"v{newVersion}";
                 
                 // Commit changes
-                await RunGitCommandAsync("add", packageJsonPath, cancellationToken);
-                await RunGitCommandAsync("commit", "-m", tagMessage, cancellationToken);
+                await RunGitCommandAsync(new[] { "add", packageJsonPath }, cancellationToken);
+                await RunGitCommandAsync(new[] { "commit", "-m", tagMessage }, cancellationToken);
                 
                 // Create tag
-                await RunGitCommandAsync("tag", $"v{newVersion}", "-m", tagMessage, cancellationToken);
+                await RunGitCommandAsync(new[] { "tag", $"v{newVersion}", "-m", tagMessage }, cancellationToken);
                 
                 Console.WriteLine($"Created git tag: v{newVersion}");
             }

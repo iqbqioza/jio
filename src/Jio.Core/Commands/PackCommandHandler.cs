@@ -44,6 +44,13 @@ public sealed class PackCommandHandler : ICommandHandler<PackCommand>
 
             var tarballName = $"{manifest.Name.Replace("@", "").Replace("/", "-")}-{manifest.Version}.tgz";
             var destination = command.Destination ?? Directory.GetCurrentDirectory();
+            
+            // Ensure destination directory exists
+            if (!Directory.Exists(destination))
+            {
+                Directory.CreateDirectory(destination);
+            }
+            
             var tarballPath = Path.Combine(destination, tarballName);
 
             if (command.DryRun)
@@ -63,10 +70,14 @@ public sealed class PackCommandHandler : ICommandHandler<PackCommand>
                 
                 Console.WriteLine($"Packing {filesToPack.Count} files...");
                 
+                // Create package directory
+                var packageDir = Path.Combine(tempDir, "package");
+                Directory.CreateDirectory(packageDir);
+                
                 foreach (var file in filesToPack)
                 {
                     var relativePath = Path.GetRelativePath(directory, file);
-                    var targetPath = Path.Combine(tempDir, "package", relativePath);
+                    var targetPath = Path.Combine(packageDir, relativePath);
                     var targetDir = Path.GetDirectoryName(targetPath)!;
                     
                     Directory.CreateDirectory(targetDir);
@@ -74,7 +85,7 @@ public sealed class PackCommandHandler : ICommandHandler<PackCommand>
                 }
 
                 // Always include package.json
-                File.Copy(packageJsonPath, Path.Combine(tempDir, "package", "package.json"), overwrite: true);
+                File.Copy(packageJsonPath, Path.Combine(packageDir, "package.json"), overwrite: true);
 
                 // Create tarball
                 await CreateTarballAsync(tempDir, tarballPath, cancellationToken);
@@ -133,7 +144,7 @@ public sealed class PackCommandHandler : ICommandHandler<PackCommand>
                 continue;
             }
 
-            var matchedFiles = Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
+            var matchedFiles = GetMatchingFiles(directory, pattern);
             foreach (var file in matchedFiles)
             {
                 var relativePath = Path.GetRelativePath(directory, file);
@@ -153,6 +164,90 @@ public sealed class PackCommandHandler : ICommandHandler<PackCommand>
         }
 
         return files.Distinct().ToList();
+    }
+
+    private string[] GetMatchingFiles(string directory, string pattern)
+    {
+        try
+        {
+            // Handle glob patterns
+            if (pattern.Contains("*"))
+            {
+                // Simple glob pattern support
+                var searchPattern = "*";
+                var searchOption = SearchOption.TopDirectoryOnly;
+                
+                if (pattern.Contains("**"))
+                {
+                    searchOption = SearchOption.AllDirectories;
+                    searchPattern = "*";
+                }
+                else if (pattern.Contains("*"))
+                {
+                    var parts = pattern.Split('/');
+                    searchPattern = parts.LastOrDefault() ?? "*";
+                }
+                
+                var allFiles = Directory.GetFiles(directory, searchPattern, searchOption);
+                return allFiles.Where(f => MatchesPattern(Path.GetRelativePath(directory, f), pattern)).ToArray();
+            }
+            else
+            {
+                // Direct file or simple pattern
+                return Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
+            }
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return Array.Empty<string>();
+        }
+        catch (Exception)
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private bool MatchesPattern(string filePath, string pattern)
+    {
+        // Simple pattern matching - replace with proper glob library in production
+        filePath = filePath.Replace('\\', '/');
+        pattern = pattern.Replace('\\', '/');
+        
+        if (pattern.Contains("**"))
+        {
+            var parts = pattern.Split("**");
+            if (parts.Length == 2)
+            {
+                var prefix = parts[0].TrimEnd('/');
+                var suffix = parts[1].TrimStart('/');
+                
+                if (string.IsNullOrEmpty(prefix) && string.IsNullOrEmpty(suffix))
+                    return true;
+                    
+                if (string.IsNullOrEmpty(prefix))
+                    return filePath.EndsWith(suffix) || filePath.Contains("/" + suffix);
+                    
+                if (string.IsNullOrEmpty(suffix))
+                    return filePath.StartsWith(prefix);
+                    
+                return filePath.StartsWith(prefix) && (filePath.EndsWith(suffix) || filePath.Contains("/" + suffix));
+            }
+        }
+        
+        // Simple wildcard matching
+        if (pattern.EndsWith("*"))
+        {
+            var prefix = pattern.TrimEnd('*');
+            return Path.GetFileName(filePath).StartsWith(prefix);
+        }
+        
+        if (pattern.StartsWith("*"))
+        {
+            var suffix = pattern.TrimStart('*');
+            return Path.GetFileName(filePath).EndsWith(suffix);
+        }
+        
+        return Path.GetFileName(filePath) == pattern || filePath == pattern;
     }
 
     private List<string> GetDefaultPatterns()

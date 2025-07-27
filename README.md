@@ -6,7 +6,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 
 - **Lightning Fast**: Optimized for speed with parallel downloads and efficient dependency resolution
 - **Storage Efficient**: Uses content-addressable storage with hard links to minimize disk usage
-- **Secure**: Built-in integrity verification and security audit capabilities
+- **Secure**: Built-in integrity verification and security audit capabilities with full cancellation support
 - **Cross-Platform**: Self-contained binaries for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64)
 - **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn (v1 & v2+/Berry), and pnpm commands
 - **Workspace/Monorepo Support**: Native support for workspaces with topological ordering and `workspace:` protocol
@@ -14,6 +14,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
 - **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx)
+- **Robust Error Handling**: Graceful handling of corrupted packages and network failures
 
 ## Installation
 
@@ -392,6 +393,12 @@ jio dedupe lodash       # Deduplicate only lodash
 jio dedupe --dry-run    # Preview deduplication
 ```
 
+This command:
+- Identifies packages with the same version installed in multiple locations
+- Moves duplicates to the highest level possible in node_modules
+- Updates the lock file after deduplication
+- Creates marker files to track deduplicated packages
+
 #### `jio patch <package>`
 Create and manage patches for dependencies
 
@@ -522,8 +529,8 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Hard Links**: Efficient linking from store to `node_modules` (falls back to copying on Windows)
 - **Parallel Downloads**: Concurrent package downloads with configurable limits
 - **Lock File**: `jio-lock.json` for reproducible installs (auto-imports and exports npm/yarn/pnpm lock files)
-- **Integrity Verification**: All packages are verified using SHA-512 hashes
-- **Lifecycle Scripts**: Full support for npm lifecycle scripts (preinstall, postinstall, prepare, etc.)
+- **Integrity Verification**: All packages are verified using SHA-512 hashes with SHA-1 fallback support
+- **Lifecycle Scripts**: Full support for npm lifecycle scripts (preinstall, postinstall, prepare, etc.) with proper error handling
 - **HTTP Retry**: Automatic retry with exponential backoff for network failures
 - **Production-Ready Logging**: Structured logging with JSON output for monitoring
 - **.npmrc Support**: Reads configuration from project, user, and global .npmrc files
@@ -531,9 +538,10 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Authentication**: Bearer token authentication for private registries
 - **Package Cache**: Downloaded packages are cached to speed up subsequent installs
 - **Direct Execution**: Run scripts and executables without prefixing with `jio run`
-- **Workspace Support**: Native monorepo support with topological dependency ordering
+- **Workspace Support**: Native monorepo support with topological dependency ordering and proper JSON error handling
 - **Global Packages**: Full support for global package installation with binary linking
 - **Security Audit**: Built-in vulnerability scanning with automatic fix capabilities
+- **Cancellation Support**: All async operations support proper cancellation via CancellationToken
 
 ### Directory Structure
 
@@ -743,7 +751,7 @@ dotnet run --project src/Jio.CLI/Jio.CLI.csproj -- install express
 
 ### Testing
 
-The project includes comprehensive unit tests:
+The project includes comprehensive unit tests with over 269 test cases covering all major functionality:
 
 ```bash
 # Run all tests
@@ -754,7 +762,18 @@ dotnet test --collect:"XPlat Code Coverage"
 
 # Run specific test
 dotnet test --filter "FullyQualifiedName~IntegrityVerifier"
+
+# Run tests for a specific class
+dotnet test --filter "ClassName~PackCommandHandlerTests"
 ```
+
+Test organization:
+- **Command Tests**: Testing all CLI commands and their handlers
+- **Resolution Tests**: Dependency resolution and version range handling
+- **Lock Tests**: Lock file parsing and generation for all formats
+- **Security Tests**: Integrity verification and security audit functionality
+- **Storage Tests**: Package store and caching mechanisms
+- **Workspace Tests**: Monorepo and workspace functionality
 
 ## License
 

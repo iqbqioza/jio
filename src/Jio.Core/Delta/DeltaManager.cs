@@ -28,6 +28,7 @@ public class DeltaManager : IDeltaManager
 
     public async Task<Stream?> GetDeltaUpdateAsync(string packageName, string fromVersion, string toVersion, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
         if (!_configuration.DeltaUpdates)
         {
             return null;
@@ -109,6 +110,7 @@ public class DeltaManager : IDeltaManager
 
     public async Task<bool> SupportsDeltaAsync(string packageName, string fromVersion, string toVersion, CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
         if (!_configuration.DeltaUpdates)
         {
             return false;

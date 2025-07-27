@@ -3,6 +3,7 @@ using System.Text.Json;
 using Jio.Core.Configuration;
 using Jio.Core.Logging;
 using Jio.Core.Models;
+using Jio.Core.Resolution;
 using Jio.Core.Storage;
 
 namespace Jio.Core.ZeroInstalls;
@@ -31,6 +32,7 @@ public class ZeroInstallsManager : IZeroInstallsManager
 
     public async Task<bool> IsZeroInstallsEnabledAsync(CancellationToken cancellationToken = default)
     {
+        await Task.CompletedTask;
         return _configuration.ZeroInstalls && Directory.Exists(_archivePath);
     }
 
@@ -215,8 +217,8 @@ public class ZeroInstallsManager : IZeroInstallsManager
             if (!entry.FullName.EndsWith("/"))
             {
                 using var entryStream = entry.Open();
-                using var fileStream = File.Create(destinationPath);
-                await entryStream.CopyToAsync(fileStream, cancellationToken);
+                using var outputFileStream = File.Create(destinationPath);
+                await entryStream.CopyToAsync(outputFileStream, cancellationToken);
             }
         }
     }

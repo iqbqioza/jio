@@ -4,13 +4,6 @@ using Jio.Core.Models;
 
 namespace Jio.Core.Dependencies;
 
-public interface ILocalDependencyResolver
-{
-    Task<string> ResolveFileAsync(string filePath, CancellationToken cancellationToken = default);
-    Task<string> ResolveLinkAsync(string linkPath, CancellationToken cancellationToken = default);
-    bool IsFileDependency(string spec);
-    bool IsLinkDependency(string spec);
-}
 
 public class LocalDependencyResolver : ILocalDependencyResolver
 {
@@ -42,6 +35,27 @@ public class LocalDependencyResolver : ILocalDependencyResolver
     public bool IsLinkDependency(string spec)
     {
         return spec.StartsWith("link:");
+    }
+
+    public Task<bool> IsLocalDependencyAsync(string dependency, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(IsFileDependency(dependency) || IsLinkDependency(dependency));
+    }
+
+    public async Task<string> ResolveAsync(string localPath, CancellationToken cancellationToken = default)
+    {
+        if (IsFileDependency(localPath))
+        {
+            return await ResolveFileAsync(localPath, cancellationToken);
+        }
+        else if (IsLinkDependency(localPath))
+        {
+            return await ResolveLinkAsync(localPath, cancellationToken);
+        }
+        else
+        {
+            throw new ArgumentException($"Invalid local dependency: {localPath}");
+        }
     }
     
     public async Task<string> ResolveFileAsync(string filePath, CancellationToken cancellationToken = default)
@@ -115,6 +129,7 @@ public class LocalDependencyResolver : ILocalDependencyResolver
     {
         try
         {
+            await Task.CompletedTask;
             // Remove link: prefix
             if (linkPath.StartsWith("link:"))
             {
@@ -279,7 +294,8 @@ public class LocalDependencyResolver : ILocalDependencyResolver
         // In production, use a proper TAR library
         var buffer = new byte[512];
         
-        while (await tarStream.ReadAsync(buffer, 0, 512, cancellationToken) == 512)
+        int bytesRead;
+        while ((bytesRead = await tarStream.ReadAtLeastAsync(buffer, 512, false, cancellationToken)) == 512)
         {
             // Check for end of archive
             if (IsEndOfArchive(buffer))
@@ -315,7 +331,8 @@ public class LocalDependencyResolver : ILocalDependencyResolver
             var padding = 512 - (fileSize % 512);
             if (padding < 512)
             {
-                await tarStream.ReadAsync(new byte[padding], 0, (int)padding, cancellationToken);
+                var paddingBuffer = new byte[padding];
+                await tarStream.ReadAtLeastAsync(paddingBuffer, (int)padding, false, cancellationToken);
             }
         }
     }
@@ -350,7 +367,7 @@ public class LocalDependencyResolver : ILocalDependencyResolver
         while (remaining > 0)
         {
             var toRead = (int)Math.Min(buffer.Length, remaining);
-            var bytesRead = await source.ReadAsync(buffer, 0, toRead, cancellationToken);
+            var bytesRead = await source.ReadAtLeastAsync(buffer.AsMemory(0, toRead), 1, false, cancellationToken);
             if (bytesRead == 0)
                 break;
                 

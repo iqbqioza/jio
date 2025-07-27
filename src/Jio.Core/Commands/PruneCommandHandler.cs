@@ -175,9 +175,9 @@ public sealed class PruneCommandHandler : ICommandHandler<PruneCommand>
         }
 
         // If we have a lock file, add all transitive dependencies
-        if (lockFile?.Dependencies != null)
+        if (lockFile?.Packages != null)
         {
-            foreach (var dep in lockFile.Dependencies)
+            foreach (var dep in lockFile.Packages)
             {
                 // Skip dev dependencies if production only
                 if (productionOnly && dep.Value.Dev == true)

@@ -3,13 +3,13 @@ using Jio.Core.Commands;
 using Jio.Core.Logging;
 using Jio.Core.Models;
 using Jio.Core.Resolution;
-using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
 namespace Jio.Core.Tests.Commands;
 
-public class PruneCommandHandlerTests
+[Collection("Command Tests")]
+public class PruneCommandHandlerTests : IDisposable
 {
     private readonly Mock<ILogger> _mockLogger;
     private readonly Mock<IDependencyResolver> _mockResolver;
@@ -29,11 +29,10 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithNoPackageJson_ReturnsError()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var command = new PruneCommand();
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(1, result);
@@ -43,7 +42,6 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithNoNodeModules_ReturnsSuccess()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var packageJson = new PackageManifest
         {
             Name = "test-package",
@@ -59,7 +57,7 @@ public class PruneCommandHandlerTests
         var command = new PruneCommand();
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(0, result);
@@ -69,7 +67,6 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithExtraneousPackages_RemovesThem()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var packageJson = new PackageManifest
         {
             Name = "test-package",
@@ -101,7 +98,7 @@ public class PruneCommandHandlerTests
         var command = new PruneCommand();
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(0, result);
@@ -113,7 +110,6 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithDryRun_DoesNotRemovePackages()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var packageJson = new PackageManifest
         {
             Name = "test-package",
@@ -138,7 +134,7 @@ public class PruneCommandHandlerTests
         var command = new PruneCommand { DryRun = true };
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(0, result);
@@ -149,7 +145,6 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithProductionFlag_RemovesDevDependencies()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var packageJson = new PackageManifest
         {
             Name = "test-package",
@@ -185,7 +180,7 @@ public class PruneCommandHandlerTests
         var command = new PruneCommand { Production = true };
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(0, result);
@@ -197,7 +192,6 @@ public class PruneCommandHandlerTests
     public async Task ExecuteAsync_WithScopedPackages_HandlesCorrectly()
     {
         // Arrange
-        Environment.CurrentDirectory = _testDirectory;
         var packageJson = new PackageManifest
         {
             Name = "test-package",
@@ -232,7 +226,7 @@ public class PruneCommandHandlerTests
         var command = new PruneCommand();
 
         // Act
-        var result = await _handler.ExecuteAsync(command);
+        var result = await ExecuteWithCurrentDirectoryAsync(async () => await _handler.ExecuteAsync(command));
 
         // Assert
         Assert.Equal(0, result);
@@ -240,11 +234,41 @@ public class PruneCommandHandlerTests
         Assert.False(Directory.Exists(reactTypesPath));
     }
 
+    private async Task<T> ExecuteWithCurrentDirectoryAsync<T>(Func<Task<T>> action)
+    {
+        var currentDir = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
+            return await action();
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
+    }
+
     public void Dispose()
     {
-        if (Directory.Exists(_testDirectory))
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            Directory.Delete(_testDirectory, recursive: true);
+            if (Directory.Exists(_testDirectory))
+            {
+                try
+                {
+                    Directory.Delete(_testDirectory, recursive: true);
+                }
+                catch
+                {
+                    // Ignore cleanup errors
+                }
+            }
         }
     }
 }

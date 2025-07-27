@@ -68,7 +68,7 @@ public sealed class DependencyResolver : IDependencyResolver
         {
             foreach (var (name, versionRange) in manifest.Dependencies)
             {
-                graph.RootDependencies.Add(name);
+                graph.RootDependencies.Add(name, versionRange);
                 tasks.Add(ResolvePackageAsync(name, versionRange, false, graph, cancellationToken));
             }
         }
@@ -78,7 +78,7 @@ public sealed class DependencyResolver : IDependencyResolver
         {
             foreach (var (name, versionRange) in manifest.DevDependencies)
             {
-                graph.RootDependencies.Add(name);
+                graph.RootDependencies.Add(name, versionRange);
                 tasks.Add(ResolvePackageAsync(name, versionRange, true, graph, cancellationToken));
             }
         }
@@ -250,7 +250,7 @@ public sealed class DependencyResolver : IDependencyResolver
         // Check for overrides/resolutions first
         if (_rootManifest != null)
         {
-            var overrideVersion = _overrideResolver.GetOverride(name, versionRange, _rootManifest);
+            var overrideVersion = _overrideResolver.GetOverride(name, _rootManifest);
             if (!string.IsNullOrEmpty(overrideVersion))
             {
                 versionRange = overrideVersion;

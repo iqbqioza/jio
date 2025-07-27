@@ -187,8 +187,7 @@ proxy='http://proxy with spaces.com:8080'
     public async Task LoadConfigurationAsync_Should_Merge_Configs()
     {
         // Arrange
-        // Create project-level .npmrc
-        Directory.SetCurrentDirectory(_testDirectory);
+        var originalDir = Directory.GetCurrentDirectory();
         var projectNpmrc = Path.Combine(_testDirectory, ".npmrc");
         await File.WriteAllTextAsync(projectNpmrc, @"
 registry=https://project.registry.com/
@@ -214,6 +213,9 @@ registry=https://user.registry.com/
 proxy=http://user.proxy.com:8080
 ");
 
+            // Change to test directory
+            Directory.SetCurrentDirectory(_testDirectory);
+
             // Act
             var config = await NpmrcParser.LoadConfigurationAsync();
 
@@ -227,6 +229,9 @@ proxy=http://user.proxy.com:8080
         }
         finally
         {
+            // Restore current directory
+            Directory.SetCurrentDirectory(originalDir);
+            
             // Restore user .npmrc
             if (File.Exists(userNpmrc))
             {

@@ -5,13 +5,15 @@ namespace Jio.Core.Resolution;
 
 public interface IOverrideResolver
 {
-    string? GetOverride(string packageName, string requestedVersion, PackageManifest manifest);
+    string? ResolveOverride(string packageName, string requestedVersion, PackageManifest manifest);
+    string? GetOverride(string packageName, PackageManifest manifest);
+    bool HasOverrides(PackageManifest manifest);
     Dictionary<string, string> GetAllOverrides(PackageManifest manifest);
 }
 
 public class OverrideResolver : IOverrideResolver
 {
-    public string? GetOverride(string packageName, string requestedVersion, PackageManifest manifest)
+    public string? ResolveOverride(string packageName, string requestedVersion, PackageManifest manifest)
     {
         // Check resolutions first (Yarn style)
         if (manifest.Resolutions != null && manifest.Resolutions.TryGetValue(packageName, out var resolution))
@@ -28,6 +30,17 @@ public class OverrideResolver : IOverrideResolver
         return null;
     }
     
+    public string? GetOverride(string packageName, PackageManifest manifest)
+    {
+        return ResolveOverride(packageName, "", manifest);
+    }
+    
+    public bool HasOverrides(PackageManifest manifest)
+    {
+        return (manifest.Resolutions != null && manifest.Resolutions.Count > 0) ||
+               (manifest.Overrides != null && manifest.Overrides.Count > 0);
+    }
+
     public Dictionary<string, string> GetAllOverrides(PackageManifest manifest)
     {
         var allOverrides = new Dictionary<string, string>();

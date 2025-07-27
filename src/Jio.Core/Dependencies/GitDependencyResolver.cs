@@ -4,11 +4,6 @@ using Jio.Core.Logging;
 
 namespace Jio.Core.Dependencies;
 
-public interface IGitDependencyResolver
-{
-    Task<string> ResolveAsync(string gitUrl, CancellationToken cancellationToken = default);
-    bool IsGitDependency(string spec);
-}
 
 public class GitDependencyResolver : IGitDependencyResolver
 {
@@ -28,7 +23,24 @@ public class GitDependencyResolver : IGitDependencyResolver
     
     public bool IsGitDependency(string spec)
     {
+        // Exclude file: protocol as it's not a Git dependency
+        if (spec.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        
         return GitUrlPattern.IsMatch(spec) || GitHubShorthandPattern.IsMatch(spec);
+    }
+
+    public Task<bool> IsGitDependencyAsync(string dependency, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(IsGitDependency(dependency));
+    }
+
+    public async Task<string> ResolveAsync(string gitUrl, string reference, CancellationToken cancellationToken = default)
+    {
+        var fullGitUrl = gitUrl + (string.IsNullOrEmpty(reference) ? "" : "#" + reference);
+        return await ResolveAsync(fullGitUrl, cancellationToken);
     }
     
     public async Task<string> ResolveAsync(string gitUrl, CancellationToken cancellationToken = default)
@@ -113,7 +125,7 @@ public class GitDependencyResolver : IGitDependencyResolver
             repoUrl += ".git";
         }
         
-        return (repoUrl, commitish);
+        return (repoUrl, refSpec);
     }
     
     private string GenerateCacheKey(string repoUrl, string commitish)
@@ -131,28 +143,28 @@ public class GitDependencyResolver : IGitDependencyResolver
     private async Task CloneRepositoryAsync(string repoUrl, string targetPath, string commitish, CancellationToken cancellationToken)
     {
         // Clone repository
-        await RunGitCommandAsync(null, "clone", "--depth", "1", repoUrl, targetPath, cancellationToken);
+        await RunGitCommandAsync(null, new[] { "clone", "--depth", "1", repoUrl, targetPath }, cancellationToken);
         
         if (commitish != "HEAD" && commitish != "master" && commitish != "main")
         {
             // Fetch specific ref
-            await RunGitCommandAsync(targetPath, "fetch", "origin", commitish, cancellationToken);
-            await RunGitCommandAsync(targetPath, "checkout", commitish, cancellationToken);
+            await RunGitCommandAsync(targetPath, new[] { "fetch", "origin", commitish }, cancellationToken);
+            await RunGitCommandAsync(targetPath, new[] { "checkout", commitish }, cancellationToken);
         }
     }
     
     private async Task UpdateRepositoryAsync(string repoPath, string commitish, CancellationToken cancellationToken)
     {
         // Fetch latest changes
-        await RunGitCommandAsync(repoPath, "fetch", "origin", cancellationToken);
+        await RunGitCommandAsync(repoPath, new[] { "fetch", "origin" }, cancellationToken);
         
         if (commitish != "HEAD")
         {
-            await RunGitCommandAsync(repoPath, "checkout", commitish, cancellationToken);
+            await RunGitCommandAsync(repoPath, new[] { "checkout", commitish }, cancellationToken);
         }
         else
         {
-            await RunGitCommandAsync(repoPath, "pull", "origin", "HEAD", cancellationToken);
+            await RunGitCommandAsync(repoPath, new[] { "pull", "origin", "HEAD" }, cancellationToken);
         }
     }
     

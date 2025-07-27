@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Jio.Core.Commands;
 using Jio.Core.Models;
+using Xunit;
 
 namespace Jio.Core.Tests.Commands;
 
@@ -12,17 +13,14 @@ public class InitCommandHandlerTests : IDisposable
     private readonly InitCommandHandler _handler;
     private readonly TextWriter _originalOut;
     private readonly TextWriter _originalError;
-    private readonly string _originalDirectory;
 
     public InitCommandHandlerTests()
     {
         _originalOut = Console.Out;
         _originalError = Console.Error;
-        _originalDirectory = Directory.GetCurrentDirectory();
         
-        _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        _testDirectory = Path.Combine(Path.GetTempPath(), "jio-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
-        Directory.SetCurrentDirectory(_testDirectory);
         _handler = new InitCommandHandler();
     }
 
@@ -35,29 +33,39 @@ public class InitCommandHandlerTests : IDisposable
             Name = "test-package",
             Yes = true
         };
-
-        // Act
-        var result = await _handler.ExecuteAsync(command);
-
-        // Assert
-        result.Should().Be(0);
+        var currentDir = Environment.CurrentDirectory;
         
-        var packageJsonPath = Path.Combine(_testDirectory, "package.json");
-        File.Exists(packageJsonPath).Should().BeTrue();
-        
-        var json = await File.ReadAllTextAsync(packageJsonPath);
-        var manifest = JsonSerializer.Deserialize<PackageManifest>(json, new JsonSerializerOptions
+        try
         {
-            PropertyNameCaseInsensitive = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        
-        manifest.Should().NotBeNull();
-        manifest!.Name.Should().Be("test-package");
-        manifest.Version.Should().Be("1.0.0");
-        manifest.Main.Should().Be("index.js");
-        manifest.License.Should().Be("ISC");
-        manifest.Scripts.Should().ContainKey("test");
+            Environment.CurrentDirectory = _testDirectory;
+
+            // Act
+            var result = await _handler.ExecuteAsync(command);
+
+            // Assert
+            result.Should().Be(0);
+            
+            var packageJsonPath = Path.Combine(_testDirectory, "package.json");
+            File.Exists(packageJsonPath).Should().BeTrue();
+            
+            var json = await File.ReadAllTextAsync(packageJsonPath);
+            var manifest = JsonSerializer.Deserialize<PackageManifest>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            });
+            
+            manifest.Should().NotBeNull();
+            manifest!.Name.Should().Be("test-package");
+            manifest.Version.Should().Be("1.0.0");
+            manifest.Main.Should().Be("index.js");
+            manifest.License.Should().Be("ISC");
+            manifest.Scripts.Should().ContainKey("test");
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
     }
 
     [Fact]
@@ -69,21 +77,31 @@ public class InitCommandHandlerTests : IDisposable
             Name = null,
             Yes = true
         };
+        var currentDir = Environment.CurrentDirectory;
+        
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
 
-        // Act
-        var result = await _handler.ExecuteAsync(command);
+            // Act
+            var result = await _handler.ExecuteAsync(command);
 
-        // Assert
-        result.Should().Be(0);
-        
-        var packageJsonPath = Path.Combine(_testDirectory, "package.json");
-        File.Exists(packageJsonPath).Should().BeTrue();
-        
-        var json = await File.ReadAllTextAsync(packageJsonPath);
-        var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        
-        root.GetProperty("name").GetString().Should().Be(Path.GetFileName(_testDirectory));
+            // Assert
+            result.Should().Be(0);
+            
+            var packageJsonPath = Path.Combine(_testDirectory, "package.json");
+            File.Exists(packageJsonPath).Should().BeTrue();
+            
+            var json = await File.ReadAllTextAsync(packageJsonPath);
+            var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            
+            root.GetProperty("name").GetString().Should().Be(Path.GetFileName(_testDirectory));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
     }
 
     [Fact]
@@ -97,15 +115,26 @@ public class InitCommandHandlerTests : IDisposable
         {
             Yes = true
         };
-
-        // Act
+        var currentDir = Environment.CurrentDirectory;
         var output = new StringWriter();
-        Console.SetOut(output);
-        var result = await _handler.ExecuteAsync(command);
+        
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
+            Console.SetOut(output);
 
-        // Assert
-        result.Should().Be(1);
-        output.ToString().Should().Contain("package.json already exists");
+            // Act
+            var result = await _handler.ExecuteAsync(command);
+
+            // Assert
+            result.Should().Be(1);
+            output.ToString().Should().Contain("package.json already exists");
+        }
+        finally
+        {
+            Console.SetOut(_originalOut);
+            Environment.CurrentDirectory = currentDir;
+        }
     }
 
     [Fact]
@@ -117,20 +146,30 @@ public class InitCommandHandlerTests : IDisposable
             Name = "valid-json-test",
             Yes = true
         };
-
-        // Act
-        await _handler.ExecuteAsync(command);
-
-        // Assert
-        var packageJsonPath = Path.Combine(_testDirectory, "package.json");
-        var json = await File.ReadAllTextAsync(packageJsonPath);
+        var currentDir = Environment.CurrentDirectory;
         
-        // Verify it's valid JSON
-        var act = () => JsonDocument.Parse(json);
-        act.Should().NotThrow();
-        
-        // Verify indentation
-        json.Should().Contain("\n  ");
+        try
+        {
+            Environment.CurrentDirectory = _testDirectory;
+
+            // Act
+            await _handler.ExecuteAsync(command);
+
+            // Assert
+            var packageJsonPath = Path.Combine(_testDirectory, "package.json");
+            var json = await File.ReadAllTextAsync(packageJsonPath);
+            
+            // Verify it's valid JSON
+            var act = () => JsonDocument.Parse(json);
+            act.Should().NotThrow();
+            
+            // Verify indentation
+            json.Should().Contain("\n  ");
+        }
+        finally
+        {
+            Environment.CurrentDirectory = currentDir;
+        }
     }
 
     public void Dispose()
@@ -140,7 +179,6 @@ public class InitCommandHandlerTests : IDisposable
             Console.SetOut(_originalOut);
             Console.SetError(_originalError);
             
-            Directory.SetCurrentDirectory(_originalDirectory);
             if (Directory.Exists(_testDirectory))
             {
                 Directory.Delete(_testDirectory, true);

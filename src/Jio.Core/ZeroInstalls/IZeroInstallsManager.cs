@@ -1,4 +1,5 @@
 using Jio.Core.Models;
+using Jio.Core.Resolution;
 
 namespace Jio.Core.ZeroInstalls;
 

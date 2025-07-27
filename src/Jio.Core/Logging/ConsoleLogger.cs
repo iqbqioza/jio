@@ -26,7 +26,42 @@ public class ConsoleLogger : ILogger
             Log(LogLevel.Debug, message, args);
     }
 
+    public void LogDebug(Exception exception, string message, params object[] args)
+    {
+        if (_minLevel <= LogLevel.Debug)
+        {
+            var formattedMessage = args.Length > 0 ? string.Format(message, args) : message;
+            if (_enableStructuredLogging)
+            {
+                var logEntry = new
+                {
+                    timestamp = DateTime.UtcNow,
+                    level = "DEBUG",
+                    message = formattedMessage,
+                    exception = new
+                    {
+                        type = exception.GetType().FullName,
+                        message = exception.Message,
+                        stackTrace = exception.StackTrace
+                    }
+                };
+                Console.WriteLine(JsonSerializer.Serialize(logEntry, _jsonOptions));
+            }
+            else
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] DEBUG: {formattedMessage}");
+                Console.WriteLine($"Exception: {exception}");
+            }
+        }
+    }
+
     public void LogInfo(string message, params object[] args)
+    {
+        if (_minLevel <= LogLevel.Info)
+            Log(LogLevel.Info, message, args);
+    }
+
+    public void LogInformation(string message, params object[] args)
     {
         if (_minLevel <= LogLevel.Info)
             Log(LogLevel.Info, message, args);
@@ -36,6 +71,35 @@ public class ConsoleLogger : ILogger
     {
         if (_minLevel <= LogLevel.Warning)
             Log(LogLevel.Warning, message, args);
+    }
+
+    public void LogWarning(Exception exception, string message, params object[] args)
+    {
+        if (_minLevel <= LogLevel.Warning)
+        {
+            var formattedMessage = args.Length > 0 ? string.Format(message, args) : message;
+            if (_enableStructuredLogging)
+            {
+                var logEntry = new
+                {
+                    timestamp = DateTime.UtcNow,
+                    level = "WARNING",
+                    message = formattedMessage,
+                    exception = new
+                    {
+                        type = exception.GetType().FullName,
+                        message = exception.Message,
+                        stackTrace = exception.StackTrace
+                    }
+                };
+                Console.Error.WriteLine(JsonSerializer.Serialize(logEntry, _jsonOptions));
+            }
+            else
+            {
+                Console.Error.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] WARN: {formattedMessage}");
+                Console.Error.WriteLine($"Exception: {exception}");
+            }
+        }
     }
 
     public void LogError(string message, params object[] args)

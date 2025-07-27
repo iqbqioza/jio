@@ -25,7 +25,9 @@ public class ProcessMonitoringOptions
     public int MaxRestarts { get; set; } = 3;
     public TimeSpan RestartDelay { get; set; } = TimeSpan.FromSeconds(1);
     public TimeSpan HealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ProcessTimeout { get; set; } = TimeSpan.FromHours(2); // Default 2-hour timeout
     public bool EnableAutoRestart { get; set; } = true;
+    public bool EnableTimeoutKill { get; set; } = true;
     public Action<ProcessHealthEvent>? OnHealthEvent { get; set; }
     public Func<ProcessHealthStatus, bool>? ShouldRestart { get; set; }
 }
@@ -46,7 +48,9 @@ public enum ProcessHealthStatus
     Crashed,
     Restarting,
     Stopped,
-    MaxRestartsExceeded
+    MaxRestartsExceeded,
+    TimedOut,
+    ForcedKill
 }
 
 public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
@@ -115,8 +119,13 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
         var outputBuilder = new System.Text.StringBuilder();
         var errorBuilder = new System.Text.StringBuilder();
         
+        // Create timeout cancellation token
+        using var timeoutCts = new CancellationTokenSource(options.ProcessTimeout);
+        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        
         while (restartCount <= options.MaxRestarts)
         {
+            Process? process = null;
             try
             {
                 NotifyHealthEvent(options, new ProcessHealthEvent
@@ -126,14 +135,18 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                     Message = restartCount == 0 ? "Process started" : $"Process restarting (attempt {restartCount})"
                 });
                 
-                using var process = CreateMonitoredProcess(fileName, args, workingDirectory);
+                process = CreateMonitoredProcess(fileName, args, workingDirectory);
                 
-                // Capture output
+                // Capture output with thread-safe handling
+                var outputLock = new object();
                 process.OutputDataReceived += (sender, e) =>
                 {
                     if (e.Data != null)
                     {
-                        outputBuilder.AppendLine(e.Data);
+                        lock (outputLock)
+                        {
+                            outputBuilder.AppendLine(e.Data);
+                        }
                     }
                 };
                 
@@ -141,7 +154,10 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                 {
                     if (e.Data != null)
                     {
-                        errorBuilder.AppendLine(e.Data);
+                        lock (outputLock)
+                        {
+                            errorBuilder.AppendLine(e.Data);
+                        }
                     }
                 };
                 
@@ -150,11 +166,11 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                 process.BeginErrorReadLine();
                 
                 // Monitor process health
-                var monitoringTask = MonitorProcessHealthAsync(process, options, cancellationToken);
+                var monitoringTask = MonitorProcessHealthAsync(process, options, combinedCts.Token);
                 
                 try
                 {
-                    await process.WaitForExitAsync(cancellationToken);
+                    await process.WaitForExitAsync(combinedCts.Token);
                     await monitoringTask;
                     
                     // Process completed successfully
@@ -197,13 +213,32 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                         Message = $"Process crashed with exit code {process.ExitCode}"
                     });
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (timeoutCts.Token.IsCancellationRequested)
                 {
-                    try
+                    // Process timed out
+                    NotifyHealthEvent(options, new ProcessHealthEvent
                     {
-                        process.Kill();
+                        Status = ProcessHealthStatus.TimedOut,
+                        RestartCount = restartCount,
+                        Message = $"Process timed out after {options.ProcessTimeout.TotalMinutes:F1} minutes"
+                    });
+                    
+                    await ForceKillProcessAsync(process, options);
+                    
+                    if (!options.EnableAutoRestart || restartCount >= options.MaxRestarts)
+                    {
+                        return new ProcessResult
+                        {
+                            ExitCode = 124, // Standard timeout exit code
+                            StandardOutput = outputBuilder.ToString(),
+                            StandardError = errorBuilder.ToString() + "\nProcess timed out"
+                        };
                     }
-                    catch { }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    // User cancelled
+                    await ForceKillProcessAsync(process, options);
                     throw;
                 }
             }
@@ -222,12 +257,32 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                     throw;
                 }
             }
+            finally
+            {
+                // Ensure process is properly disposed
+                try
+                {
+                    process?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing process");
+                }
+            }
             
             restartCount++;
             
             if (restartCount <= options.MaxRestarts)
             {
-                await Task.Delay(options.RestartDelay, cancellationToken);
+                try
+                {
+                    await Task.Delay(options.RestartDelay, combinedCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // If cancelled during delay, stop retrying
+                    break;
+                }
             }
         }
         
@@ -238,12 +293,15 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
             Message = "Maximum restart attempts exceeded"
         });
         
-        return new ProcessResult
+        var result = new ProcessResult
         {
             ExitCode = -1,
             StandardOutput = outputBuilder.ToString(),
             StandardError = errorBuilder.ToString() + "\nMaximum restart attempts exceeded"
         };
+        
+        _logger.LogError($"Process execution failed after {restartCount} restart attempts");
+        return result;
     }
     
     private async Task<ProcessResult> ExecuteShellWithMonitoringAsync(
@@ -272,6 +330,14 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
     private Process CreateMonitoredProcess(string fileName, string[] args, string? workingDirectory)
     {
         var process = new Process();
+        var safeWorkingDirectory = workingDirectory ?? Environment.CurrentDirectory;
+        
+        // Validate working directory exists
+        if (!Directory.Exists(safeWorkingDirectory))
+        {
+            throw new DirectoryNotFoundException($"Working directory does not exist: {safeWorkingDirectory}");
+        }
+        
         process.StartInfo = new ProcessStartInfo
         {
             FileName = fileName,
@@ -280,11 +346,11 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory
+            WorkingDirectory = safeWorkingDirectory
         };
         
         // Ensure node_modules/.bin is in PATH
-        var nodeModulesBin = Path.Combine(workingDirectory ?? Environment.CurrentDirectory, "node_modules", ".bin");
+        var nodeModulesBin = Path.Combine(safeWorkingDirectory, "node_modules", ".bin");
         if (Directory.Exists(nodeModulesBin))
         {
             var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
@@ -292,12 +358,17 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
             process.StartInfo.Environment["PATH"] = $"{nodeModulesBin}{pathSeparator}{currentPath}";
         }
         
+        // Set process priority to normal to prevent system overload
+        process.StartInfo.Environment["PROCESS_PRIORITY"] = "Normal";
+        
         return process;
     }
     
     private async Task MonitorProcessHealthAsync(Process process, ProcessMonitoringOptions options, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(options.HealthCheckInterval);
+        var lastCpuTime = TimeSpan.Zero;
+        var hangDetectionCount = 0;
         
         try
         {
@@ -314,15 +385,38 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
                     Message = $"Process is running (PID: {process.Id})"
                 });
                 
-                // Check process responsiveness by examining CPU usage
+                // Enhanced health monitoring
                 try
                 {
                     process.Refresh();
                     
-                    // If process is not responding, it might be hung
+                    // Check if process is responding
                     if (!process.Responding)
                     {
-                        _logger.LogWarning($"Process {process.Id} is not responding");
+                        hangDetectionCount++;
+                        _logger.LogWarning($"Process {process.Id} is not responding (count: {hangDetectionCount})");
+                        
+                        // If process hasn't responded for multiple checks, consider it hung
+                        if (hangDetectionCount >= 3)
+                        {
+                            _logger.LogError($"Process {process.Id} appears to be hung, will restart if enabled");
+                            NotifyHealthEvent(options, new ProcessHealthEvent
+                            {
+                                Status = ProcessHealthStatus.Crashed,
+                                Message = "Process appears to be hung (not responding)"
+                            });
+                        }
+                    }
+                    else
+                    {
+                        hangDetectionCount = 0; // Reset hang detection
+                    }
+                    
+                    // Monitor memory usage
+                    var memoryUsage = process.WorkingSet64;
+                    if (memoryUsage > 1024 * 1024 * 1024) // 1GB threshold
+                    {
+                        _logger.LogWarning($"Process {process.Id} is using high memory: {memoryUsage / (1024 * 1024)} MB");
                     }
                 }
                 catch (Exception ex)
@@ -337,9 +431,70 @@ public class ResilientNodeJsHelper : NodeJsHelper, IResilientNodeJsHelper
         }
     }
     
+    private async Task ForceKillProcessAsync(Process? process, ProcessMonitoringOptions options)
+    {
+        if (process == null || process.HasExited)
+            return;
+            
+        if (!options.EnableTimeoutKill)
+            return;
+            
+        try
+        {
+            NotifyHealthEvent(options, new ProcessHealthEvent
+            {
+                Status = ProcessHealthStatus.ForcedKill,
+                Message = $"Force killing process {process.Id}"
+            });
+            
+            // Try graceful termination first
+            try
+            {
+                process.CloseMainWindow();
+                if (await WaitForExitAsync(process, TimeSpan.FromSeconds(5)))
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Graceful termination failed, proceed to force kill
+            }
+            
+            // Force kill
+            process.Kill(entireProcessTree: true);
+            await WaitForExitAsync(process, TimeSpan.FromSeconds(10));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, $"Failed to kill process {process?.Id}");
+        }
+    }
+    
+    private static async Task<bool> WaitForExitAsync(Process process, TimeSpan timeout)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            await process.WaitForExitAsync(cts.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+    }
+    
     private void NotifyHealthEvent(ProcessMonitoringOptions options, ProcessHealthEvent healthEvent)
     {
-        _logger.LogDebug($"Process health event: {healthEvent.Status} - {healthEvent.Message}");
-        options.OnHealthEvent?.Invoke(healthEvent);
+        try
+        {
+            _logger.LogDebug($"Process health event: {healthEvent.Status} - {healthEvent.Message}");
+            options.OnHealthEvent?.Invoke(healthEvent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error in health event notification");
+        }
     }
 }

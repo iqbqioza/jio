@@ -27,6 +27,8 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Proxy Support**: Full proxy configuration including authentication
 - **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx) - requires Node.js
 - **Fault-Tolerant Script Execution**: Automatic process monitoring and restart capability for scripts with `--watch` flag
+- **Production-Ready Reliability**: Circuit breaker pattern, timeout protection, and comprehensive error handling for enterprise environments
+- **Resource Management**: Memory leak prevention, process monitoring, and automatic resource cleanup
 - **Robust Error Handling**: Graceful handling of corrupted packages and network failures
 
 ## Installation
@@ -183,6 +185,12 @@ jio run server --watch --max-restarts 5  # Run with custom restart limit
 **Note**: Script execution requires Node.js to be installed. Jio will automatically detect Node.js from your PATH, nvm, or common installation locations.
 
 **Process Monitoring**: Use `--watch` flag to enable automatic restart on process failure. This provides fault tolerance for long-running scripts like development servers.
+
+**Production Safety**: jio includes enterprise-grade reliability features:
+- **Circuit Breaker**: Automatically stops failing scripts to prevent system overload
+- **Timeout Protection**: 2-hour timeout for scripts with automatic termination
+- **Resource Monitoring**: Memory and disk usage monitoring with automatic cleanup
+- **Concurrent Execution Control**: Limits simultaneous script executions to prevent resource exhaustion
 ```
 
 #### `jio test`
@@ -635,6 +643,7 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Security Audit**: Built-in vulnerability scanning with automatic fix capabilities
 - **Cancellation Support**: All async operations support proper cancellation via CancellationToken
 - **Node.js Integration**: Automatic detection and integration with installed Node.js for script execution
+- **Enterprise Reliability**: Circuit breaker pattern, comprehensive timeout handling, and automatic resource management for production environments
 
 ### Directory Structure
 
@@ -882,7 +891,7 @@ dotnet run --project src/Jio.CLI/Jio.CLI.csproj -- install express
 
 ### Testing
 
-The project includes comprehensive unit tests with over 269 test cases covering all major functionality:
+The project includes comprehensive unit tests with over 300 test cases covering all major functionality:
 
 ```bash
 # Run all tests
@@ -896,15 +905,20 @@ dotnet test --filter "FullyQualifiedName~IntegrityVerifier"
 
 # Run tests for a specific class
 dotnet test --filter "ClassName~PackCommandHandlerTests"
+
+# Run production reliability tests
+dotnet test --filter "ProductionRunCommandHandlerTests"
 ```
 
 Test organization:
 - **Command Tests**: Testing all CLI commands and their handlers
+- **Production Tests**: Enterprise reliability features including circuit breaker and timeout handling
 - **Resolution Tests**: Dependency resolution and version range handling
 - **Lock Tests**: Lock file parsing and generation for all formats
 - **Security Tests**: Integrity verification and security audit functionality
 - **Storage Tests**: Package store and caching mechanisms
 - **Workspace Tests**: Monorepo and workspace functionality
+- **Resilience Tests**: Process monitoring and automatic restart capabilities
 
 ## License
 

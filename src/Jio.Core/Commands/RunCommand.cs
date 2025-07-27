@@ -382,4 +382,5 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
             return 1;
         }
     }
+    
 }

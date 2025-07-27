@@ -57,18 +57,88 @@ services.AddSingleton<IHealthCheckService, HealthCheckService>();
 services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
 services.AddSingleton<IPackageCache, FileSystemPackageCache>();
-services.AddScoped<IDependencyResolver>(sp =>
+
+// Performance configuration
+var enableFastMode = Environment.GetEnvironmentVariable("JIO_FAST_MODE") != "false"; // Default: true
+var maxDownloadConcurrency = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_DOWNLOAD_CONCURRENCY"), out var dlConcurrency) 
+    ? dlConcurrency : 20;
+var maxResolveConcurrency = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_RESOLVE_CONCURRENCY"), out var resConcurrency) 
+    ? resConcurrency : 50;
+
+// High-performance components
+services.AddSingleton<IHighPerformancePackageDownloader>(sp =>
+{
+    var httpClient = sp.GetRequiredService<HttpClient>();
+    var packageCache = sp.GetRequiredService<IPackageCache>();
+    var logger = sp.GetRequiredService<ILogger>();
+    return new HighPerformancePackageDownloader(httpClient, packageCache, logger, maxDownloadConcurrency);
+});
+
+services.AddSingleton<IFastDependencyResolver>(sp =>
 {
     var registry = sp.GetRequiredService<IPackageRegistry>();
     var config = sp.GetRequiredService<JioConfiguration>();
     var logger = sp.GetRequiredService<ILogger>();
-    return new DependencyResolver(registry, config, logger);
+    return new FastDependencyResolver(registry, config, logger, maxResolveConcurrency);
 });
-services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();
+
+services.AddSingleton<ILockFileManager, LockFileManager>();
+
+// Use fast or standard implementations based on configuration
+if (enableFastMode)
+{
+    services.AddScoped<ICommandHandler<InstallCommand>>(sp =>
+    {
+        var resolver = sp.GetRequiredService<IFastDependencyResolver>();
+        var downloader = sp.GetRequiredService<IHighPerformancePackageDownloader>();
+        var packageStore = sp.GetRequiredService<IPackageStore>();
+        var scriptRunner = sp.GetRequiredService<ILifecycleScriptRunner>();
+        var config = sp.GetRequiredService<JioConfiguration>();
+        var logger = sp.GetRequiredService<ILogger>();
+        var lockFileManager = sp.GetRequiredService<ILockFileManager>();
+        return new FastInstallCommandHandler(resolver, downloader, packageStore, scriptRunner, config, logger, lockFileManager);
+    });
+    
+    services.AddScoped<ICommandHandler<UpdateCommand>>(sp =>
+    {
+        var registry = sp.GetRequiredService<IPackageRegistry>();
+        var resolver = sp.GetRequiredService<IFastDependencyResolver>();
+        var downloader = sp.GetRequiredService<IHighPerformancePackageDownloader>();
+        var packageStore = sp.GetRequiredService<IPackageStore>();
+        var scriptRunner = sp.GetRequiredService<ILifecycleScriptRunner>();
+        var config = sp.GetRequiredService<JioConfiguration>();
+        var logger = sp.GetRequiredService<ILogger>();
+        var lockFileManager = sp.GetRequiredService<ILockFileManager>();
+        return new FastUpdateCommandHandler(registry, resolver, downloader, packageStore, scriptRunner, config, logger, lockFileManager);
+    });
+}
+else
+{
+    services.AddScoped<IDependencyResolver>(sp =>
+    {
+        var registry = sp.GetRequiredService<IPackageRegistry>();
+        var config = sp.GetRequiredService<JioConfiguration>();
+        var logger = sp.GetRequiredService<ILogger>();
+        return new DependencyResolver(registry, config, logger);
+    });
+    services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();
+    services.AddScoped<ICommandHandler<UpdateCommand>, UpdateCommandHandler>();
+}
+
+services.AddScoped<ICommandHandler<PrefetchCommand>>(sp =>
+{
+    var registry = sp.GetRequiredService<IPackageRegistry>();
+    var resolver = sp.GetRequiredService<IFastDependencyResolver>();
+    var downloader = sp.GetRequiredService<IHighPerformancePackageDownloader>();
+    var packageCache = sp.GetRequiredService<IPackageCache>();
+    var config = sp.GetRequiredService<JioConfiguration>();
+    var logger = sp.GetRequiredService<ILogger>();
+    var lockFileManager = sp.GetRequiredService<ILockFileManager>();
+    return new PrefetchCommandHandler(registry, resolver, downloader, packageCache, config, logger, lockFileManager);
+});
 services.AddScoped<ICommandHandler<InitCommand>, InitCommandHandler>();
 services.AddScoped<ICommandHandler<RunCommand>, RunCommandHandler>();
 services.AddScoped<ICommandHandler<UninstallCommand>, UninstallCommandHandler>();
-services.AddScoped<ICommandHandler<UpdateCommand>, UpdateCommandHandler>();
 services.AddScoped<ICommandHandler<ListCommand>, ListCommandHandler>();
 services.AddScoped<ICommandHandler<OutdatedCommand>, OutdatedCommandHandler>();
 services.AddScoped<ICommandHandler<ExecCommand>, ExecCommandHandler>();
@@ -837,6 +907,33 @@ patchCommand.SetHandler(async (string package, bool create, string? editDir) =>
 }, patchPackageArg, patchCreateOption, patchEditDirOption);
 rootCommand.AddCommand(patchCommand);
 
+// Prefetch command
+var prefetchCommand = new Command("prefetch", "Download packages to cache without installing");
+var prefetchPackageArg = new Argument<string?>("package", () => null, "Package to prefetch");
+var prefetchAllOption = new Option<bool>("--all", "Prefetch all packages from lock file");
+var prefetchProductionOption = new Option<bool>("--production", "Only prefetch production dependencies");
+var prefetchDeepOption = new Option<bool>("--deep", () => true, "Include all dependencies");
+var prefetchConcurrencyOption = new Option<int>("--concurrency", () => 50, "Number of concurrent downloads");
+prefetchCommand.AddArgument(prefetchPackageArg);
+prefetchCommand.AddOption(prefetchAllOption);
+prefetchCommand.AddOption(prefetchProductionOption);
+prefetchCommand.AddOption(prefetchDeepOption);
+prefetchCommand.AddOption(prefetchConcurrencyOption);
+prefetchCommand.SetHandler(async (string? package, bool all, bool production, bool deep, int concurrency) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<PrefetchCommand>>();
+    var exitCode = await handler.ExecuteAsync(new PrefetchCommand 
+    { 
+        Package = package,
+        All = all,
+        Production = production,
+        Deep = deep,
+        Concurrency = concurrency
+    });
+    Environment.Exit(exitCode);
+}, prefetchPackageArg, prefetchAllOption, prefetchProductionOption, prefetchDeepOption, prefetchConcurrencyOption);
+rootCommand.AddCommand(prefetchCommand);
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
@@ -844,7 +941,7 @@ if (args.Length > 0)
     var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
                                 "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
                                 "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", 
-                                "dlx", "cache", "config", "why", "ci", "pack", "version", "prune", "dedupe", "ddp", "patch", "--help", "-h", "--version" };
+                                "dlx", "cache", "config", "why", "ci", "pack", "version", "prune", "dedupe", "ddp", "patch", "prefetch", "--help", "-h", "--version" };
     
     if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
     {

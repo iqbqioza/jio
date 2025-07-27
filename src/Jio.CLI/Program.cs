@@ -125,14 +125,16 @@ installCommand.AddAlias("i");
 var packageArgument = new Argument<string?>("package", () => null, "Package to install");
 var saveDevOption = new Option<bool>("--save-dev", "Save as dev dependency");
 var saveOptionalOption = new Option<bool>("--save-optional", "Save as optional dependency");
+var savePeerOption = new Option<bool>("--save-peer", "Save as peer dependency");
 var saveExactOption = new Option<bool>("--save-exact", "Save exact version");
 var globalOption = new Option<bool>("-g", "Install globally");
 installCommand.AddArgument(packageArgument);
 installCommand.AddOption(saveDevOption);
 installCommand.AddOption(saveOptionalOption);
+installCommand.AddOption(savePeerOption);
 installCommand.AddOption(saveExactOption);
 installCommand.AddOption(globalOption);
-installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptional, bool saveExact, bool global) =>
+installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptional, bool savePeer, bool saveExact, bool global) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<InstallCommand>>();
     var exitCode = await handler.ExecuteAsync(new InstallCommand 
@@ -140,11 +142,12 @@ installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptiona
         Package = package,
         SaveDev = saveDev,
         SaveOptional = saveOptional,
+        SavePeer = savePeer,
         SaveExact = saveExact,
         Global = global
     });
     Environment.Exit(exitCode);
-}, packageArgument, saveDevOption, saveOptionalOption, saveExactOption, globalOption);
+}, packageArgument, saveDevOption, saveOptionalOption, savePeerOption, saveExactOption, globalOption);
 
 // Run command
 var runCommand = new Command("run", "Run scripts defined in package.json");

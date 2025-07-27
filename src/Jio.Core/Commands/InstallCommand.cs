@@ -20,6 +20,7 @@ public sealed class InstallCommand
     public string? Package { get; init; }
     public bool SaveDev { get; init; }
     public bool SaveOptional { get; init; }
+    public bool SavePeer { get; init; }
     public bool SaveExact { get; init; }
     public bool Global { get; init; }
     public string? Filter { get; init; }
@@ -100,6 +101,16 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
             if (command.SaveDev)
             {
                 manifest.DevDependencies[name] = command.SaveExact ? version : $"^{version}";
+            }
+            else if (command.SaveOptional)
+            {
+                manifest.OptionalDependencies ??= new Dictionary<string, string>();
+                manifest.OptionalDependencies[name] = command.SaveExact ? version : $"^{version}";
+            }
+            else if (command.SavePeer)
+            {
+                manifest.PeerDependencies ??= new Dictionary<string, string>();
+                manifest.PeerDependencies[name] = command.SaveExact ? version : $"^{version}";
             }
             else
             {

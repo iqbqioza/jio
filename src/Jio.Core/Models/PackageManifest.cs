@@ -56,10 +56,10 @@ public sealed class PackageManifest
     public object? Bin { get; init; }
     
     [JsonPropertyName("optionalDependencies")]
-    public Dictionary<string, string>? OptionalDependencies { get; init; }
+    public Dictionary<string, string>? OptionalDependencies { get; set; }
     
     [JsonPropertyName("peerDependencies")]
-    public Dictionary<string, string>? PeerDependencies { get; init; }
+    public Dictionary<string, string>? PeerDependencies { get; set; }
     
     [JsonPropertyName("overrides")]
     public Dictionary<string, object>? Overrides { get; init; }

@@ -53,6 +53,9 @@ jio add express
 # Install as dev dependency
 jio install --save-dev typescript
 
+# Install as peer dependency
+jio install --save-peer react
+
 # Install exact version
 jio install express@4.18.2 --save-exact
 ```
@@ -107,6 +110,7 @@ Arguments:
 Options:
 - `--save-dev`: Save as dev dependency
 - `--save-optional`: Save as optional dependency
+- `--save-peer`: Save as peer dependency
 - `--save-exact`: Save exact version instead of using caret (^) range
 - `-g`: Install globally
 

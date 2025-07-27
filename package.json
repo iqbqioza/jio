@@ -1,0 +1,20 @@
+{
+  "name": "jio",
+  "version": "0.1.0",
+  "description": "Fast, secure, and storage-efficient JavaScript package manager",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "package-manager",
+    "npm",
+    "javascript",
+    "fast",
+    "storage-efficient"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Jio.Core.Logging;
 using Jio.Core.Models;
+using Jio.Core.Node;
 
 namespace Jio.Core.Scripts;
 
@@ -14,6 +15,7 @@ public interface ILifecycleScriptRunner
 public class LifecycleScriptRunner : ILifecycleScriptRunner
 {
     private readonly ILogger _logger;
+    private readonly INodeJsHelper _nodeJsHelper;
     private readonly JsonSerializerOptions _jsonOptions;
     
     // Standard npm lifecycle events
@@ -29,9 +31,10 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
         ["version"] = new[] { "preversion", "version", "postversion" }
     };
 
-    public LifecycleScriptRunner(ILogger logger)
+    public LifecycleScriptRunner(ILogger logger, INodeJsHelper nodeJsHelper)
     {
         _logger = logger;
+        _nodeJsHelper = nodeJsHelper;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -68,7 +71,7 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
                 return true; // Not an error if script doesn't exist
             }
 
-            _logger.LogInfo("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
+            _logger.LogInformation("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
             Console.WriteLine($"> {scriptName}");
             Console.WriteLine($"> {scriptCommand}");
 
@@ -157,70 +160,45 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
     {
         try
         {
-            var shell = GetShell();
-            var shellArgs = GetShellArgs(script);
-            
-            var startInfo = new ProcessStartInfo
+            // Check if Node.js is available
+            var nodeInfo = await _nodeJsHelper.DetectNodeJsAsync(cancellationToken);
+            if (nodeInfo?.IsValid != true)
             {
-                FileName = shell,
-                Arguments = shellArgs,
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            // Set environment variables
-            foreach (var kvp in environment)
-            {
-                startInfo.Environment[kvp.Key] = kvp.Value;
+                _logger.LogError("Node.js is not installed or could not be detected. Please install Node.js from https://nodejs.org/");
+                return false;
             }
 
-            using var process = new Process { StartInfo = startInfo };
-            
-            process.OutputDataReceived += (sender, e) =>
+            // Update PATH to include Node.js directory
+            var nodeDir = Path.GetDirectoryName(nodeInfo.ExecutablePath);
+            if (!string.IsNullOrEmpty(nodeDir))
             {
-                if (!string.IsNullOrEmpty(e.Data))
-                    Console.WriteLine(e.Data);
-            };
+                var pathSeparator = OperatingSystem.IsWindows() ? ";" : ":";
+                var currentPath = environment.ContainsKey("PATH") ? environment["PATH"] : "";
+                if (!currentPath.Contains(nodeDir))
+                {
+                    environment["PATH"] = $"{nodeDir}{pathSeparator}{currentPath}";
+                }
+            }
+
+            // Execute the script using NodeJsHelper
+            var result = await _nodeJsHelper.ExecuteNpmScriptAsync(script, workingDirectory, cancellationToken);
             
-            process.ErrorDataReceived += (sender, e) =>
+            if (!string.IsNullOrWhiteSpace(result.StandardOutput))
             {
-                if (!string.IsNullOrEmpty(e.Data))
-                    Console.Error.WriteLine(e.Data);
-            };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            await process.WaitForExitAsync(cancellationToken);
+                Console.WriteLine(result.StandardOutput);
+            }
             
-            return process.ExitCode == 0;
+            if (!string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                Console.Error.WriteLine(result.StandardError);
+            }
+
+            return result.Success;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to execute script: {0}", script);
             return false;
         }
-    }
-
-    private static string GetShell()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return Environment.GetEnvironmentVariable("COMSPEC") ?? "cmd.exe";
-        }
-        return Environment.GetEnvironmentVariable("SHELL") ?? "/bin/sh";
-    }
-
-    private static string GetShellArgs(string script)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return $"/c \"{script}\"";
-        }
-        return $"-c \"{script}\"";
     }
 }

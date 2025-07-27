@@ -259,4 +259,107 @@ proxy=http://user.proxy.com:8080
             // Ignore cleanup errors
         }
     }
+    
+    [Fact]
+    public async Task WriteAsync_CreatesNewFile_WhenFileDoesNotExist()
+    {
+        var filePath = Path.Combine(_testDirectory, "new.npmrc");
+        
+        await NpmrcParser.WriteAsync(filePath, "registry", "https://custom.registry.com/");
+        
+        File.Exists(filePath).Should().BeTrue();
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("registry=https://custom.registry.com/");
+    }
+    
+    [Fact]
+    public async Task WriteAsync_UpdatesExistingKey_WhenKeyExists()
+    {
+        var filePath = Path.Combine(_testDirectory, "update.npmrc");
+        await File.WriteAllTextAsync(filePath, "registry=https://old.registry.com/\nproxy=http://proxy.com:8080");
+        
+        await NpmrcParser.WriteAsync(filePath, "registry", "https://new.registry.com/");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("registry=https://new.registry.com/");
+        content.Should().Contain("proxy=http://proxy.com:8080");
+        content.Should().NotContain("https://old.registry.com/");
+    }
+    
+    [Fact]
+    public async Task WriteAsync_AddsNewKey_WhenKeyDoesNotExist()
+    {
+        var filePath = Path.Combine(_testDirectory, "add.npmrc");
+        await File.WriteAllTextAsync(filePath, "registry=https://registry.npmjs.org/");
+        
+        await NpmrcParser.WriteAsync(filePath, "proxy", "http://proxy.com:8080");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("registry=https://registry.npmjs.org/");
+        content.Should().Contain("proxy=http://proxy.com:8080");
+    }
+    
+    [Fact]
+    public async Task WriteAsync_PreservesComments_WhenUpdatingFile()
+    {
+        var filePath = Path.Combine(_testDirectory, "comments.npmrc");
+        await File.WriteAllTextAsync(filePath, "# This is a comment\nregistry=https://registry.npmjs.org/\n# Another comment");
+        
+        await NpmrcParser.WriteAsync(filePath, "proxy", "http://proxy.com:8080");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("# This is a comment");
+        content.Should().Contain("# Another comment");
+        content.Should().Contain("proxy=http://proxy.com:8080");
+    }
+    
+    [Fact]
+    public async Task DeleteAsync_RemovesKey_WhenKeyExists()
+    {
+        var filePath = Path.Combine(_testDirectory, "delete.npmrc");
+        await File.WriteAllTextAsync(filePath, "registry=https://registry.npmjs.org/\nproxy=http://proxy.com:8080");
+        
+        await NpmrcParser.DeleteAsync(filePath, "proxy");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("registry=https://registry.npmjs.org/");
+        content.Should().NotContain("proxy");
+    }
+    
+    [Fact]
+    public async Task DeleteAsync_DoesNothing_WhenKeyDoesNotExist()
+    {
+        var filePath = Path.Combine(_testDirectory, "delete-missing.npmrc");
+        await File.WriteAllTextAsync(filePath, "registry=https://registry.npmjs.org/");
+        
+        await NpmrcParser.DeleteAsync(filePath, "proxy");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("registry=https://registry.npmjs.org/");
+    }
+    
+    [Fact]
+    public async Task DeleteAsync_DoesNothing_WhenFileDoesNotExist()
+    {
+        var filePath = Path.Combine(_testDirectory, "nonexistent.npmrc");
+        
+        await NpmrcParser.DeleteAsync(filePath, "proxy");
+        
+        File.Exists(filePath).Should().BeFalse();
+    }
+    
+    [Fact]
+    public async Task WriteAsync_HandlesSpecialCharacters_InValue()
+    {
+        var filePath = Path.Combine(_testDirectory, "special.npmrc");
+        
+        await NpmrcParser.WriteAsync(filePath, "user-agent", "jio/1.0.0 (Linux x64) node/16.0.0");
+        
+        var content = await File.ReadAllTextAsync(filePath);
+        content.Should().Contain("user-agent=jio/1.0.0 (Linux x64) node/16.0.0");
+        
+        // Verify it can be parsed back correctly
+        var config = await NpmrcParser.ParseAsync(filePath);
+        config.UserAgent.Should().Be("jio/1.0.0 (Linux x64) node/16.0.0");
+    }
 }

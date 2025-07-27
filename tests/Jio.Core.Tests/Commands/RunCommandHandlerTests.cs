@@ -2,15 +2,21 @@ using System.Text.Json;
 using FluentAssertions;
 using Jio.Core.Commands;
 using Jio.Core.Models;
+using Jio.Core.Node;
+using Jio.Core.Logging;
+using Moq;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Sequential")]
 public class RunCommandHandlerTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly RunCommandHandler _handler;
     private readonly TextWriter _originalOut;
     private readonly TextWriter _originalError;
+    private readonly Mock<INodeJsHelper> _nodeJsHelper;
+    private readonly Mock<ILogger> _logger;
 
     public RunCommandHandlerTests()
     {
@@ -19,7 +25,19 @@ public class RunCommandHandlerTests : IDisposable
         
         _testDirectory = Path.Combine(Path.GetTempPath(), "jio-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_testDirectory);
-        _handler = new RunCommandHandler();
+        
+        _nodeJsHelper = new Mock<INodeJsHelper>();
+        _logger = new Mock<ILogger>();
+        
+        // Setup default Node.js detection
+        _nodeJsHelper.Setup(x => x.DetectNodeJsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NodeJsInfo { ExecutablePath = "/usr/bin/node", Version = "18.0.0", NpmVersion = "9.0.0" });
+        
+        // Setup default script execution
+        _nodeJsHelper.Setup(x => x.ExecuteNpmScriptAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult { ExitCode = 0, StandardOutput = "", StandardError = "" });
+        
+        _handler = new RunCommandHandler(_nodeJsHelper.Object, _logger.Object);
     }
 
     [Fact]
@@ -166,12 +184,41 @@ public class RunCommandHandlerTests : IDisposable
         var currentDir = Environment.CurrentDirectory;
         try
         {
+            // Ensure test directory exists
+            if (!Directory.Exists(_testDirectory))
+            {
+                Directory.CreateDirectory(_testDirectory);
+            }
             Environment.CurrentDirectory = _testDirectory;
             return await action();
         }
         finally
         {
-            Environment.CurrentDirectory = currentDir;
+            try
+            {
+                // Only change back if the current directory still exists
+                if (Directory.Exists(currentDir))
+                {
+                    Environment.CurrentDirectory = currentDir;
+                }
+                else
+                {
+                    // Fall back to a safe directory
+                    Environment.CurrentDirectory = Path.GetTempPath();
+                }
+            }
+            catch
+            {
+                // If all else fails, use temp directory
+                try
+                {
+                    Environment.CurrentDirectory = Path.GetTempPath();
+                }
+                catch
+                {
+                    // Ignore if we can't even set temp directory
+                }
+            }
         }
     }
 

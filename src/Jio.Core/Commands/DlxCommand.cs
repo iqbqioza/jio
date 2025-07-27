@@ -4,6 +4,8 @@ using System.Text.Json;
 using Jio.Core.Models;
 using Jio.Core.Registry;
 using Jio.Core.Storage;
+using Jio.Core.Node;
+using Jio.Core.Logging;
 
 namespace Jio.Core.Commands;
 
@@ -19,12 +21,16 @@ public sealed class DlxCommandHandler : ICommandHandler<DlxCommand>
 {
     private readonly IPackageRegistry _registry;
     private readonly IPackageStore _store;
+    private readonly INodeJsHelper _nodeJsHelper;
+    private readonly ILogger _logger;
     private readonly JsonSerializerOptions _jsonOptions;
     
-    public DlxCommandHandler(IPackageRegistry registry, IPackageStore store)
+    public DlxCommandHandler(IPackageRegistry registry, IPackageStore store, INodeJsHelper nodeJsHelper, ILogger logger)
     {
         _registry = registry;
         _store = store;
+        _nodeJsHelper = nodeJsHelper;
+        _logger = logger;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -142,33 +148,32 @@ public sealed class DlxCommandHandler : ICommandHandler<DlxCommand>
                 Console.WriteLine($"Executing {executableName}...");
             }
             
-            // Execute the command
-            var process = new Process
+            // Check if Node.js is available
+            var nodeInfo = await _nodeJsHelper.DetectNodeJsAsync(cancellationToken);
+            if (nodeInfo?.IsValid != true)
             {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = GetNodeExecutable(),
-                    ArgumentList = { executablePath },
-                    WorkingDirectory = Directory.GetCurrentDirectory(),
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            
-            // Add user arguments
-            foreach (var arg in command.Arguments)
-            {
-                process.StartInfo.ArgumentList.Add(arg);
+                _logger.LogError("Node.js is not installed or could not be detected. Please install Node.js from https://nodejs.org/");
+                return 1;
             }
             
-            // Set up environment
-            process.StartInfo.Environment["PATH"] = $"{Path.Combine(tempDir, "node_modules", ".bin")}{Path.PathSeparator}{Environment.GetEnvironmentVariable("PATH")}";
-            process.StartInfo.Environment["NODE_PATH"] = nodeModules;
+            // Execute the command
+            var result = await _nodeJsHelper.ExecuteNodeAsync(
+                executablePath,
+                command.Arguments.ToArray(),
+                Directory.GetCurrentDirectory(),
+                cancellationToken);
             
-            process.Start();
-            await process.WaitForExitAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                Console.WriteLine(result.StandardOutput);
+            }
             
-            return process.ExitCode;
+            if (!string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                Console.Error.WriteLine(result.StandardError);
+            }
+            
+            return result.ExitCode;
         }
         finally
         {
@@ -182,14 +187,5 @@ public sealed class DlxCommandHandler : ICommandHandler<DlxCommand>
                 // Ignore cleanup errors
             }
         }
-    }
-    
-    private static string GetNodeExecutable()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        {
-            return "node.exe";
-        }
-        return "node";
     }
 }

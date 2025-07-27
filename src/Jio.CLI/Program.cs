@@ -14,6 +14,7 @@ using Jio.Core.Scripts;
 using Jio.Core.Dependencies;
 using Jio.Core.Patches;
 using Jio.Core.Security;
+using Jio.Core.Node;
 
 var services = new ServiceCollection();
 
@@ -56,6 +57,8 @@ services.AddSingleton<IHealthCheckService, HealthCheckService>();
 services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
 services.AddSingleton<IPackageCache, FileSystemPackageCache>();
+
+// Dependency resolver
 services.AddScoped<IDependencyResolver>(sp =>
 {
     var registry = sp.GetRequiredService<IPackageRegistry>();
@@ -63,11 +66,18 @@ services.AddScoped<IDependencyResolver>(sp =>
     var logger = sp.GetRequiredService<ILogger>();
     return new DependencyResolver(registry, config, logger);
 });
+
+// Command handlers
 services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();
-services.AddScoped<ICommandHandler<InitCommand>, InitCommandHandler>();
-services.AddScoped<ICommandHandler<RunCommand>, RunCommandHandler>();
-services.AddScoped<ICommandHandler<UninstallCommand>, UninstallCommandHandler>();
 services.AddScoped<ICommandHandler<UpdateCommand>, UpdateCommandHandler>();
+services.AddScoped<ICommandHandler<InitCommand>, InitCommandHandler>();
+services.AddScoped<ICommandHandler<RunCommand>>(sp =>
+{
+    var nodeJsHelper = sp.GetRequiredService<INodeJsHelper>();
+    var logger = sp.GetRequiredService<ILogger>();
+    return new RunCommandHandler(nodeJsHelper, logger);
+});
+services.AddScoped<ICommandHandler<UninstallCommand>, UninstallCommandHandler>();
 services.AddScoped<ICommandHandler<ListCommand>, ListCommandHandler>();
 services.AddScoped<ICommandHandler<OutdatedCommand>, OutdatedCommandHandler>();
 services.AddScoped<ICommandHandler<ExecCommand>, ExecCommandHandler>();
@@ -76,7 +86,14 @@ services.AddScoped<ICommandHandler<LinkCommand>, LinkCommandHandler>();
 services.AddScoped<ICommandHandler<PublishCommand>, PublishCommandHandler>();
 services.AddScoped<ICommandHandler<SearchCommand>, SearchCommandHandler>();
 services.AddScoped<ICommandHandler<ViewCommand>, ViewCommandHandler>();
-services.AddScoped<ICommandHandler<DlxCommand>, DlxCommandHandler>();
+services.AddScoped<ICommandHandler<DlxCommand>>(sp =>
+{
+    var registry = sp.GetRequiredService<IPackageRegistry>();
+    var store = sp.GetRequiredService<IPackageStore>();
+    var nodeJsHelper = sp.GetRequiredService<INodeJsHelper>();
+    var logger = sp.GetRequiredService<ILogger>();
+    return new DlxCommandHandler(registry, store, nodeJsHelper, logger);
+});
 services.AddScoped<ICommandHandler<CiCommand>, CiCommandHandler>();
 services.AddScoped<ICommandHandler<PackCommand>, PackCommandHandler>();
 services.AddScoped<ICommandHandler<VersionCommand>, VersionCommandHandler>();
@@ -86,7 +103,39 @@ services.AddScoped<ICommandHandler<PatchCommand>, PatchCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 services.AddSingleton<IPatchManager, PatchManager>();
 services.AddSingleton<ISignatureVerifier, SignatureVerifier>();
-services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
+// Register both standard and resilient NodeJsHelper
+services.AddSingleton<INodeJsHelper, ResilientNodeJsHelper>();
+services.AddSingleton<IResilientNodeJsHelper>(sp => (IResilientNodeJsHelper)sp.GetRequiredService<INodeJsHelper>());
+
+// Script execution configuration
+var enableHighPerformance = Environment.GetEnvironmentVariable("JIO_HIGH_PERFORMANCE_SCRIPTS") == "true";
+var maxScriptConcurrency = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_SCRIPT_CONCURRENCY"), out var concurrency) 
+    ? concurrency : 10;
+var maxScriptQueueSize = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_SCRIPT_QUEUE_SIZE"), out var queueSize) 
+    ? queueSize : 100;
+var maxRequestsPerMinute = int.TryParse(Environment.GetEnvironmentVariable("JIO_MAX_REQUESTS_PER_MINUTE"), out var rpm) 
+    ? rpm : 300;
+
+if (enableHighPerformance)
+{
+    services.AddSingleton<IScriptExecutionPool>(sp =>
+    {
+        var logger = sp.GetRequiredService<ILogger>();
+        var nodeJsHelper = sp.GetRequiredService<INodeJsHelper>();
+        return new ScriptExecutionPool(logger, nodeJsHelper, maxScriptConcurrency, maxScriptQueueSize);
+    });
+    
+    services.AddSingleton<ILifecycleScriptRunner>(sp =>
+    {
+        var logger = sp.GetRequiredService<ILogger>();
+        var executionPool = sp.GetRequiredService<IScriptExecutionPool>();
+        return new HighPerformanceLifecycleScriptRunner(logger, executionPool, maxRequestsPerMinute);
+    });
+}
+else
+{
+    services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
+}
 services.AddSingleton<IGitDependencyResolver>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger>();
@@ -102,6 +151,21 @@ services.AddSingleton<ILocalDependencyResolver>(sp =>
 services.AddSingleton<IOverrideResolver, OverrideResolver>();
 
 var serviceProvider = services.BuildServiceProvider();
+
+// Check Node.js availability at startup
+var nodeJsHelper = serviceProvider.GetRequiredService<INodeJsHelper>();
+var nodeInfo = await nodeJsHelper.DetectNodeJsAsync();
+if (nodeInfo == null || !nodeInfo.IsValid)
+{
+    Console.Error.WriteLine("⚠️  Warning: Node.js could not be detected on your system.");
+    Console.Error.WriteLine("   Some features may not work correctly without Node.js installed.");
+    Console.Error.WriteLine("   Please install Node.js from https://nodejs.org/");
+}
+else
+{
+    var logger = serviceProvider.GetRequiredService<ILogger>();
+    logger.LogDebug($"Detected Node.js {nodeInfo.Version} at {nodeInfo.ExecutablePath}");
+}
 
 // Create root command
 var rootCommand = new RootCommand("jio - Fast, secure, and storage-efficient JavaScript package manager");
@@ -125,14 +189,16 @@ installCommand.AddAlias("i");
 var packageArgument = new Argument<string?>("package", () => null, "Package to install");
 var saveDevOption = new Option<bool>("--save-dev", "Save as dev dependency");
 var saveOptionalOption = new Option<bool>("--save-optional", "Save as optional dependency");
+var savePeerOption = new Option<bool>("--save-peer", "Save as peer dependency");
 var saveExactOption = new Option<bool>("--save-exact", "Save exact version");
 var globalOption = new Option<bool>("-g", "Install globally");
 installCommand.AddArgument(packageArgument);
 installCommand.AddOption(saveDevOption);
 installCommand.AddOption(saveOptionalOption);
+installCommand.AddOption(savePeerOption);
 installCommand.AddOption(saveExactOption);
 installCommand.AddOption(globalOption);
-installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptional, bool saveExact, bool global) =>
+installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptional, bool savePeer, bool saveExact, bool global) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<InstallCommand>>();
     var exitCode = await handler.ExecuteAsync(new InstallCommand 
@@ -140,11 +206,12 @@ installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptiona
         Package = package,
         SaveDev = saveDev,
         SaveOptional = saveOptional,
+        SavePeer = savePeer,
         SaveExact = saveExact,
         Global = global
     });
     Environment.Exit(exitCode);
-}, packageArgument, saveDevOption, saveOptionalOption, saveExactOption, globalOption);
+}, packageArgument, saveDevOption, saveOptionalOption, savePeerOption, saveExactOption, globalOption);
 
 // Run command
 var runCommand = new Command("run", "Run scripts defined in package.json");
@@ -154,13 +221,17 @@ var recursiveOption = new Option<bool>("-r", "Run script in all workspaces recur
 var filterOption = new Option<string?>("--filter", "Filter workspaces by name");
 var parallelOption = new Option<bool>("--parallel", "Run scripts in parallel");
 var streamOption = new Option<bool>("--stream", "Stream output from scripts");
+var watchOption = new Option<bool>("--watch", "Enable process monitoring and auto-restart on failure");
+var maxRestartsOption = new Option<int?>("--max-restarts", "Maximum number of restart attempts (default: 3)");
 runCommand.AddArgument(scriptArgument);
 runCommand.AddOption(scriptArgsOption);
 runCommand.AddOption(recursiveOption);
 runCommand.AddOption(filterOption);
 runCommand.AddOption(parallelOption);
 runCommand.AddOption(streamOption);
-runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive, string? filter, bool parallel, bool stream) =>
+runCommand.AddOption(watchOption);
+runCommand.AddOption(maxRestartsOption);
+runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive, string? filter, bool parallel, bool stream, bool watch, int? maxRestarts) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<RunCommand>>();
     var exitCode = await handler.ExecuteAsync(new RunCommand 
@@ -170,10 +241,12 @@ runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive
         Recursive = recursive,
         Filter = filter,
         Parallel = parallel,
-        Stream = stream
+        Stream = stream,
+        Watch = watch,
+        MaxRestarts = maxRestarts
     });
     Environment.Exit(exitCode);
-}, scriptArgument, scriptArgsOption, recursiveOption, filterOption, parallelOption, streamOption);
+}, scriptArgument, scriptArgsOption, recursiveOption, filterOption, parallelOption, streamOption, watchOption, maxRestartsOption);
 
 // Test command (alias for run test)
 var testCommand = new Command("test", "Run test script");
@@ -567,6 +640,64 @@ configGetCommand.SetHandler((string key) =>
     Environment.Exit(value != null ? 0 : 1);
 }, configKeyArgument);
 configCommand.AddCommand(configGetCommand);
+
+// Config set command
+var configSetCommand = new Command("set", "Set a configuration value");
+var configSetKeyArgument = new Argument<string>("key", "Configuration key");
+var configSetValueArgument = new Argument<string>("value", "Configuration value");
+configSetCommand.AddArgument(configSetKeyArgument);
+configSetCommand.AddArgument(configSetValueArgument);
+configSetCommand.SetHandler(async (string key, string value) =>
+{
+    // Validate key
+    var validKeys = new[] { "registry", "proxy", "https-proxy", "no-proxy", "strict-ssl", "maxsockets", "user-agent", "ca" };
+    if (!validKeys.Contains(key) && !key.StartsWith("@") && !key.StartsWith("//"))
+    {
+        Console.Error.WriteLine($"Unknown configuration key: {key}");
+        Environment.Exit(1);
+    }
+    
+    // Get .npmrc path
+    var npmrcPath = Path.Combine(Environment.CurrentDirectory, ".npmrc");
+    
+    try
+    {
+        await NpmrcParser.WriteAsync(npmrcPath, key, value);
+        Console.WriteLine($"Set {key}={value}");
+        Environment.Exit(0);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Failed to set configuration: {ex.Message}");
+        Environment.Exit(1);
+    }
+}, configSetKeyArgument, configSetValueArgument);
+configCommand.AddCommand(configSetCommand);
+
+// Config delete command
+var configDeleteCommand = new Command("delete", "Delete a configuration key");
+configDeleteCommand.AddAlias("rm");
+var configDeleteKeyArgument = new Argument<string>("key", "Configuration key to delete");
+configDeleteCommand.AddArgument(configDeleteKeyArgument);
+configDeleteCommand.SetHandler(async (string key) =>
+{
+    // Get .npmrc path
+    var npmrcPath = Path.Combine(Environment.CurrentDirectory, ".npmrc");
+    
+    try
+    {
+        await NpmrcParser.DeleteAsync(npmrcPath, key);
+        Console.WriteLine($"Deleted {key}");
+        Environment.Exit(0);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Failed to delete configuration: {ex.Message}");
+        Environment.Exit(1);
+    }
+}, configDeleteKeyArgument);
+configCommand.AddCommand(configDeleteCommand);
+
 rootCommand.AddCommand(configCommand);
 
 // Why command (pnpm compatibility)
@@ -730,6 +861,7 @@ patchCommand.SetHandler(async (string package, bool create, string? editDir) =>
 }, patchPackageArg, patchCreateOption, patchEditDirOption);
 rootCommand.AddCommand(patchCommand);
 
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
@@ -766,4 +898,39 @@ if (args.Length > 0)
     }
 }
 
-return await rootCommand.InvokeAsync(args);
+// Set up graceful shutdown
+var exitCode = 0;
+var appLifetime = new CancellationTokenSource();
+
+Console.CancelKeyPress += (sender, e) =>
+{
+    e.Cancel = true;
+    appLifetime.Cancel();
+    
+    // Dispose of the execution pool if it exists
+    if (enableHighPerformance && serviceProvider.GetService<IScriptExecutionPool>() is IDisposable pool)
+    {
+        pool.Dispose();
+    }
+};
+
+try
+{
+    exitCode = await rootCommand.InvokeAsync(args);
+}
+finally
+{
+    // Clean up resources
+    if (enableHighPerformance && serviceProvider.GetService<IScriptExecutionPool>() is IDisposable pool)
+    {
+        pool.Dispose();
+    }
+    
+    // Dispose service provider
+    if (serviceProvider is IDisposable sp)
+    {
+        sp.Dispose();
+    }
+}
+
+return exitCode;

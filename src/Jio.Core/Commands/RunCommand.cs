@@ -2,6 +2,9 @@ using System.Diagnostics;
 using System.Text.Json;
 using Jio.Core.Models;
 using Jio.Core.Workspaces;
+using Jio.Core.Node;
+using Jio.Core.Logging;
+using Jio.Core.Configuration;
 
 namespace Jio.Core.Commands;
 
@@ -13,14 +16,22 @@ public sealed class RunCommand
     public string? Filter { get; init; }
     public bool Parallel { get; init; }
     public bool Stream { get; init; }
+    public bool Watch { get; init; }
+    public int? MaxRestarts { get; init; }
 }
 
 public sealed class RunCommandHandler : ICommandHandler<RunCommand>
 {
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly INodeJsHelper _nodeJsHelper;
+    private readonly ILogger _logger;
+    private readonly ProcessResilienceConfiguration _resilienceConfig;
     
-    public RunCommandHandler()
+    public RunCommandHandler(INodeJsHelper nodeJsHelper, ILogger logger)
     {
+        _nodeJsHelper = nodeJsHelper;
+        _logger = logger;
+        _resilienceConfig = ProcessResilienceDefaults.Development;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -97,8 +108,8 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
         Console.WriteLine($"> {fullCommand}");
         Console.WriteLine();
         
-        // Execute the script
-        var exitCode = await ExecuteScriptAsync(fullCommand, cancellationToken);
+        // Execute the script with monitoring if watch mode is enabled
+        var exitCode = await ExecuteScriptWithOptionsAsync(fullCommand, command, command.Watch, cancellationToken);
         
         if (exitCode != 0)
         {
@@ -110,60 +121,74 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
     
     private async Task<int> ExecuteScriptAsync(string script, CancellationToken cancellationToken)
     {
-        var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
-        var shellArgs = OperatingSystem.IsWindows() ? $"/c {script}" : $"-c \"{script}\"";
-        
-        var processInfo = new ProcessStartInfo
-        {
-            FileName = shell,
-            Arguments = shellArgs,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            RedirectStandardInput = false,
-            WorkingDirectory = Directory.GetCurrentDirectory()
-        };
-        
-        // Set up PATH to include node_modules/.bin
-        var nodeModulesBin = Path.Combine(Directory.GetCurrentDirectory(), "node_modules", ".bin");
-        if (Directory.Exists(nodeModulesBin))
-        {
-            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-            var separator = OperatingSystem.IsWindows() ? ";" : ":";
-            processInfo.Environment["PATH"] = $"{nodeModulesBin}{separator}{currentPath}";
-        }
-        
+        return await ExecuteScriptWithOptionsAsync(script, null, false, cancellationToken);
+    }
+    
+    private async Task<int> ExecuteScriptWithOptionsAsync(string script, RunCommand? command, bool useMonitoring, CancellationToken cancellationToken)
+    {
         try
         {
-            using var process = Process.Start(processInfo);
-            if (process == null)
+            // Check if Node.js is available
+            var nodeInfo = await _nodeJsHelper.DetectNodeJsAsync(cancellationToken);
+            if (nodeInfo?.IsValid != true)
             {
-                throw new InvalidOperationException("Failed to start process");
+                _logger.LogError("Node.js is not installed or could not be detected. Please install Node.js from https://nodejs.org/");
+                return 1;
             }
             
-            // Read and display output in real-time
-            var outputTask = Task.Run(async () =>
+            // Use resilient helper if monitoring is requested
+            if (useMonitoring && _nodeJsHelper is IResilientNodeJsHelper resilientHelper)
             {
-                string? line;
-                while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+                var options = new ProcessMonitoringOptions
                 {
-                    Console.WriteLine(line);
+                    EnableAutoRestart = command?.Watch ?? _resilienceConfig.EnableAutoRestart,
+                    MaxRestarts = command?.MaxRestarts ?? _resilienceConfig.MaxRestarts,
+                    RestartDelay = TimeSpan.FromSeconds(_resilienceConfig.RestartDelaySeconds),
+                    HealthCheckInterval = TimeSpan.FromSeconds(_resilienceConfig.HealthCheckIntervalSeconds),
+                    OnHealthEvent = (e) => 
+                    {
+                        if (e.Status == ProcessHealthStatus.Restarting)
+                        {
+                            Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] Process restarting (attempt {e.RestartCount})...");
+                        }
+                        else if (e.Status == ProcessHealthStatus.Crashed)
+                        {
+                            Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] Process crashed: {e.Message}");
+                        }
+                    }
+                };
+                
+                var result = await resilientHelper.ExecuteNpmScriptWithMonitoringAsync(script, Directory.GetCurrentDirectory(), options, cancellationToken);
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Console.WriteLine(result.StandardOutput);
                 }
-            });
-            
-            var errorTask = Task.Run(async () =>
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Console.Error.WriteLine(result.StandardError);
+                }
+                
+                return result.ExitCode;
+            }
+            else
             {
-                string? line;
-                while ((line = await process.StandardError.ReadLineAsync()) != null)
+                // Execute the script using standard NodeJsHelper
+                var result = await _nodeJsHelper.ExecuteNpmScriptAsync(script, Directory.GetCurrentDirectory(), cancellationToken);
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
                 {
-                    Console.Error.WriteLine(line);
+                    Console.WriteLine(result.StandardOutput);
                 }
-            });
-            
-            await process.WaitForExitAsync(cancellationToken);
-            await Task.WhenAll(outputTask, errorTask);
-            
-            return process.ExitCode;
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Console.Error.WriteLine(result.StandardError);
+                }
+                
+                return result.ExitCode;
+            }
         }
         catch (Exception ex)
         {
@@ -323,62 +348,39 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
     
     private async Task<int> ExecuteScriptInDirectoryAsync(string script, string workingDirectory, bool stream, CancellationToken cancellationToken)
     {
-        var shell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
-        var shellArgs = OperatingSystem.IsWindows() ? $"/c {script}" : $"-c \"{script}\"";
-        
-        var processInfo = new ProcessStartInfo
+        try
         {
-            FileName = shell,
-            Arguments = shellArgs,
-            UseShellExecute = false,
-            RedirectStandardOutput = !stream,
-            RedirectStandardError = !stream,
-            RedirectStandardInput = false,
-            WorkingDirectory = workingDirectory
-        };
-        
-        // Set up PATH to include node_modules/.bin from both workspace and root
-        var workspaceNodeModulesBin = Path.Combine(workingDirectory, "node_modules", ".bin");
-        var rootNodeModulesBin = Path.Combine(Directory.GetCurrentDirectory(), "node_modules", ".bin");
-        var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-        var separator = OperatingSystem.IsWindows() ? ";" : ":";
-        
-        var paths = new List<string>();
-        if (Directory.Exists(workspaceNodeModulesBin))
-            paths.Add(workspaceNodeModulesBin);
-        if (Directory.Exists(rootNodeModulesBin))
-            paths.Add(rootNodeModulesBin);
-        paths.Add(currentPath);
-        
-        processInfo.Environment["PATH"] = string.Join(separator, paths);
-        
-        using var process = Process.Start(processInfo);
-        if (process == null)
-        {
-            throw new InvalidOperationException("Failed to start process");
-        }
-        
-        if (!stream)
-        {
-            // Capture output but don't display it unless there's an error
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            
-            await process.WaitForExitAsync(cancellationToken);
-            
-            if (process.ExitCode != 0)
+            // Check if Node.js is available
+            var nodeInfo = await _nodeJsHelper.DetectNodeJsAsync(cancellationToken);
+            if (nodeInfo?.IsValid != true)
             {
-                if (!string.IsNullOrEmpty(output))
-                    Console.WriteLine(output);
-                if (!string.IsNullOrEmpty(error))
-                    Console.Error.WriteLine(error);
+                _logger.LogError("Node.js is not installed or could not be detected. Please install Node.js from https://nodejs.org/");
+                return 1;
             }
+            
+            // Execute the script using NodeJsHelper
+            var result = await _nodeJsHelper.ExecuteNpmScriptAsync(script, workingDirectory, cancellationToken);
+            
+            if (!stream || result.ExitCode != 0)
+            {
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Console.WriteLine(result.StandardOutput);
+                }
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Console.Error.WriteLine(result.StandardError);
+                }
+            }
+            
+            return result.ExitCode;
         }
-        else
+        catch (Exception ex)
         {
-            await process.WaitForExitAsync(cancellationToken);
+            _logger.LogError(ex, "Failed to execute script in directory: {0}", workingDirectory);
+            return 1;
         }
-        
-        return process.ExitCode;
     }
+    
 }

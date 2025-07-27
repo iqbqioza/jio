@@ -162,7 +162,7 @@ public sealed class CiCommandHandler : ICommandHandler<CiCommand>
             
             // Track success (TrackEvent is available in ITelemetryService)
             var successMessage = $"CI completed: {graph.Packages.Count} packages installed";
-            _logger.LogInfo(successMessage);
+            _logger.LogInformation(successMessage);
             
             return 0;
         }

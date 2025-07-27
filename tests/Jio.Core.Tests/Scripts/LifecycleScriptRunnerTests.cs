@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Jio.Core.Logging;
 using Jio.Core.Models;
+using Jio.Core.Node;
 using Jio.Core.Scripts;
 using Moq;
 
@@ -10,13 +11,40 @@ namespace Jio.Core.Tests.Scripts;
 public sealed class LifecycleScriptRunnerTests : IDisposable
 {
     private readonly Mock<ILogger> _loggerMock;
+    private readonly Mock<INodeJsHelper> _nodeJsHelperMock;
     private readonly LifecycleScriptRunner _runner;
     private readonly string _tempDirectory;
 
     public LifecycleScriptRunnerTests()
     {
         _loggerMock = new Mock<ILogger>();
-        _runner = new LifecycleScriptRunner(_loggerMock.Object);
+        _nodeJsHelperMock = new Mock<INodeJsHelper>();
+        
+        // Setup default Node.js detection
+        _nodeJsHelperMock.Setup(n => n.DetectNodeJsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NodeJsInfo 
+            { 
+                ExecutablePath = "node", 
+                Version = "16.0.0", 
+                NpmVersion = "8.0.0" 
+            });
+        
+        _nodeJsHelperMock.Setup(n => n.ExecuteNpmScriptAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string script, string? workingDir, CancellationToken ct) =>
+            {
+                // Return appropriate exit codes based on script content
+                if (script.Contains("exit 1"))
+                {
+                    return new ProcessResult { ExitCode = 1, StandardOutput = "", StandardError = "Script failed" };
+                }
+                if (script.Contains("nonexistent-command"))
+                {
+                    return new ProcessResult { ExitCode = 127, StandardOutput = "", StandardError = "Command not found" };
+                }
+                return new ProcessResult { ExitCode = 0, StandardOutput = "", StandardError = "" };
+            });
+        
+        _runner = new LifecycleScriptRunner(_loggerMock.Object, _nodeJsHelperMock.Object);
         _tempDirectory = Path.Combine(Path.GetTempPath(), "jio-script-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDirectory);
     }
@@ -79,7 +107,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         var result = await _runner.RunScriptAsync("test", _tempDirectory);
         
         result.Should().BeTrue();
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -163,7 +191,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         // Verify each script was logged
         foreach (var script in expectedScripts)
         {
-            _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", script, It.IsAny<string>()), Times.Once);
+            _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", script, It.IsAny<string>()), Times.Once);
         }
     }
 
@@ -198,9 +226,9 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         result.Should().BeFalse();
         
         // Should run pretest and test, but not posttest due to failure
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "pretest", It.IsAny<string>()), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Never);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "pretest", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Never);
         _loggerMock.Verify(l => l.LogError("Lifecycle script '{0}' failed", "test"), Times.Once);
     }
 
@@ -225,7 +253,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         // Should skip pretest and test (not found), but run posttest
         _loggerMock.Verify(l => l.LogDebug("Script '{0}' not found", "pretest"), Times.Once);
         _loggerMock.Verify(l => l.LogDebug("Script '{0}' not found", "test"), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Once);
     }
 
     [Fact]

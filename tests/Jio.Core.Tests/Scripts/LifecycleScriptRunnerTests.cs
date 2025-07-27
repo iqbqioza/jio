@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Jio.Core.Logging;
 using Jio.Core.Models;
+using Jio.Core.Node;
 using Jio.Core.Scripts;
 using Moq;
 
@@ -10,13 +11,28 @@ namespace Jio.Core.Tests.Scripts;
 public sealed class LifecycleScriptRunnerTests : IDisposable
 {
     private readonly Mock<ILogger> _loggerMock;
+    private readonly Mock<INodeJsHelper> _nodeJsHelperMock;
     private readonly LifecycleScriptRunner _runner;
     private readonly string _tempDirectory;
 
     public LifecycleScriptRunnerTests()
     {
         _loggerMock = new Mock<ILogger>();
-        _runner = new LifecycleScriptRunner(_loggerMock.Object);
+        _nodeJsHelperMock = new Mock<INodeJsHelper>();
+        
+        // Setup default Node.js detection
+        _nodeJsHelperMock.Setup(n => n.DetectNodeJsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new NodeJsInfo 
+            { 
+                ExecutablePath = "node", 
+                Version = "16.0.0", 
+                NpmVersion = "8.0.0" 
+            });
+        
+        _nodeJsHelperMock.Setup(n => n.ExecuteNpmScriptAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcessResult { ExitCode = 0, StandardOutput = "", StandardError = "" });
+        
+        _runner = new LifecycleScriptRunner(_loggerMock.Object, _nodeJsHelperMock.Object);
         _tempDirectory = Path.Combine(Path.GetTempPath(), "jio-script-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDirectory);
     }

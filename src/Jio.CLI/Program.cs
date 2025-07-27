@@ -14,6 +14,7 @@ using Jio.Core.Scripts;
 using Jio.Core.Dependencies;
 using Jio.Core.Patches;
 using Jio.Core.Security;
+using Jio.Core.Node;
 
 var services = new ServiceCollection();
 
@@ -86,6 +87,7 @@ services.AddScoped<ICommandHandler<PatchCommand>, PatchCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 services.AddSingleton<IPatchManager, PatchManager>();
 services.AddSingleton<ISignatureVerifier, SignatureVerifier>();
+services.AddSingleton<INodeJsHelper, NodeJsHelper>();
 services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
 services.AddSingleton<IGitDependencyResolver>(sp =>
 {
@@ -102,6 +104,21 @@ services.AddSingleton<ILocalDependencyResolver>(sp =>
 services.AddSingleton<IOverrideResolver, OverrideResolver>();
 
 var serviceProvider = services.BuildServiceProvider();
+
+// Check Node.js availability at startup
+var nodeJsHelper = serviceProvider.GetRequiredService<INodeJsHelper>();
+var nodeInfo = await nodeJsHelper.DetectNodeJsAsync();
+if (nodeInfo == null || !nodeInfo.IsValid)
+{
+    Console.Error.WriteLine("⚠️  Warning: Node.js could not be detected on your system.");
+    Console.Error.WriteLine("   Some features may not work correctly without Node.js installed.");
+    Console.Error.WriteLine("   Please install Node.js from https://nodejs.org/");
+}
+else
+{
+    var logger = serviceProvider.GetRequiredService<ILogger>();
+    logger.LogDebug($"Detected Node.js {nodeInfo.Version} at {nodeInfo.ExecutablePath}");
+}
 
 // Create root command
 var rootCommand = new RootCommand("jio - Fast, secure, and storage-efficient JavaScript package manager");

@@ -8,6 +8,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Storage Efficient**: Uses content-addressable storage with hard links to minimize disk usage
 - **Secure**: Built-in integrity verification and security audit capabilities with full cancellation support
 - **Cross-Platform**: Self-contained binaries for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64)
+- **Node.js Detection**: Automatically detects installed Node.js for script execution and package binaries
 - **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn (v1 & v2+/Berry), and pnpm commands
 - **Workspace/Monorepo Support**: Native support for workspaces with topological ordering and `workspace:` protocol
 - **Lock File Compatibility**: Automatically imports and exports package-lock.json, yarn.lock (v1 & Berry), and pnpm-lock.yaml
@@ -28,6 +29,15 @@ sudo mv jio /usr/local/bin/
 # Or add to PATH
 export PATH=$PATH:/path/to/jio
 ```
+
+### Node.js Integration
+
+While jio is a self-contained binary and doesn't require Node.js for basic package management operations, having Node.js installed enables:
+- Running npm scripts from package.json
+- Executing package binaries created with proper Node.js paths
+- Better compatibility with the JavaScript ecosystem
+
+jio will automatically detect your Node.js installation at startup and use it when available. If Node.js is not found, jio will display a warning but continue to work for package installation and management.
 
 ## Usage
 
@@ -533,13 +543,14 @@ Patches are automatically applied during `jio install`
 | Health checks | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Telemetry/Metrics | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Platform** |
-| Node.js required | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Node.js required | ✅ | ✅ | ✅ | ✅ | ❌ (optional) |
 | Self-contained binary | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Cross-platform | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Node.js auto-detection | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ### Key Differences
 
-- **jio** is written in C#/.NET and ships as a self-contained binary, no Node.js required
+- **jio** is written in C#/.NET and ships as a self-contained binary, Node.js is optional but automatically detected
 - **jio** uses content-addressable storage with hard links similar to pnpm
 - **jio** can import and export lock files from all major package managers
 - **jio** includes production-ready features like structured logging and health checks
@@ -573,6 +584,7 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Global Packages**: Full support for global package installation with binary linking
 - **Security Audit**: Built-in vulnerability scanning with automatic fix capabilities
 - **Cancellation Support**: All async operations support proper cancellation via CancellationToken
+- **Node.js Integration**: Automatic detection and integration with installed Node.js for script execution
 
 ### Directory Structure
 

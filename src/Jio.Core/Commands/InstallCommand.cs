@@ -12,6 +12,7 @@ using Jio.Core.Configuration;
 using Jio.Core.Patches;
 using Jio.Core.ZeroInstalls;
 using Jio.Core.Security;
+using Jio.Core.Node;
 
 namespace Jio.Core.Commands;
 
@@ -36,6 +37,7 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
     private readonly ILogger _logger;
     private readonly ITelemetryService _telemetry;
     private readonly ISignatureVerifier _signatureVerifier;
+    private readonly INodeJsHelper _nodeJsHelper;
     private readonly JsonSerializerOptions _jsonOptions;
     
     public InstallCommandHandler(
@@ -44,7 +46,8 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         IPackageStore store,
         ILogger logger,
         ITelemetryService telemetry,
-        ISignatureVerifier signatureVerifier)
+        ISignatureVerifier signatureVerifier,
+        INodeJsHelper nodeJsHelper)
     {
         _registry = registry;
         _resolver = resolver;
@@ -52,7 +55,8 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         _logger = logger;
         _telemetry = telemetry;
         _signatureVerifier = signatureVerifier;
-        _scriptRunner = new LifecycleScriptRunner(logger);
+        _nodeJsHelper = nodeJsHelper;
+        _scriptRunner = new LifecycleScriptRunner(logger, nodeJsHelper);
         _jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -479,13 +483,24 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
     
     private async Task CreateBinLink(string binName, string targetPath, string globalBin)
     {
+        // Detect Node.js executable
+        var nodeExe = "node";
+        try
+        {
+            nodeExe = await _nodeJsHelper.GetNodeExecutableAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"Could not detect Node.js, using 'node' as fallback: {ex.Message}");
+        }
+
         if (OperatingSystem.IsWindows())
         {
             // Create .cmd file
             var cmdPath = Path.Combine(globalBin, $"{binName}.cmd");
             var cmdContent = $@"@ECHO off
 SETLOCAL
-SET ""NODE_EXE=%~dp0\node.exe""
+SET ""NODE_EXE={nodeExe}""
 IF NOT EXIST ""%NODE_EXE%"" (
   SET ""NODE_EXE=node""
 )
@@ -497,11 +512,11 @@ IF NOT EXIST ""%NODE_EXE%"" (
             var ps1Path = Path.Combine(globalBin, $"{binName}.ps1");
             var ps1Content = $@"#!/usr/bin/env pwsh
 $basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent
-$exe=""""
-if ($PSVersionTable.PSVersion -lt ""6.0"" -or $IsWindows) {{
-  $exe="".exe""
+$node_exe=""{nodeExe}""
+if (-not (Test-Path $node_exe)) {{
+  $node_exe=""node""
 }}
-& ""$basedir/node$exe"" ""{targetPath}"" $args
+& ""$node_exe"" ""{targetPath}"" $args
 exit $LASTEXITCODE
 ";
             await File.WriteAllTextAsync(ps1Path, ps1Content);
@@ -512,7 +527,11 @@ exit $LASTEXITCODE
             var binPath = Path.Combine(globalBin, binName);
             var content = $@"#!/bin/sh
 basedir=$(dirname ""$(echo ""$0"" | sed -e 's,\\,/,g')"")
-exec node ""{targetPath}"" ""$@""
+node_exe=""{nodeExe}""
+if [ ! -f ""$node_exe"" ]; then
+  node_exe=""node""
+fi
+exec ""$node_exe"" ""{targetPath}"" ""$@""
 ";
             await File.WriteAllTextAsync(binPath, content);
             

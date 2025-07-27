@@ -8,6 +8,7 @@ using Moq;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Sequential")]
 public class RunCommandHandlerTests : IDisposable
 {
     private readonly string _testDirectory;
@@ -183,12 +184,41 @@ public class RunCommandHandlerTests : IDisposable
         var currentDir = Environment.CurrentDirectory;
         try
         {
+            // Ensure test directory exists
+            if (!Directory.Exists(_testDirectory))
+            {
+                Directory.CreateDirectory(_testDirectory);
+            }
             Environment.CurrentDirectory = _testDirectory;
             return await action();
         }
         finally
         {
-            Environment.CurrentDirectory = currentDir;
+            try
+            {
+                // Only change back if the current directory still exists
+                if (Directory.Exists(currentDir))
+                {
+                    Environment.CurrentDirectory = currentDir;
+                }
+                else
+                {
+                    // Fall back to a safe directory
+                    Environment.CurrentDirectory = Path.GetTempPath();
+                }
+            }
+            catch
+            {
+                // If all else fails, use temp directory
+                try
+                {
+                    Environment.CurrentDirectory = Path.GetTempPath();
+                }
+                catch
+                {
+                    // Ignore if we can't even set temp directory
+                }
+            }
         }
     }
 

@@ -85,7 +85,7 @@ public class ScriptExecutionPool : IScriptExecutionPool
         // Start resource monitor
         _resourceMonitor = new Timer(MonitorResources, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
         
-        _logger.LogInfo($"Script execution pool initialized with {maxConcurrency} workers and queue size {maxQueueSize}");
+        _logger.LogInformation($"Script execution pool initialized with {maxConcurrency} workers and queue size {maxQueueSize}");
     }
 
     public async Task<ProcessResult> ExecuteAsync(ScriptExecutionRequest request, CancellationToken cancellationToken = default)
@@ -236,7 +236,7 @@ public class ScriptExecutionPool : IScriptExecutionPool
             if (_totalExecutions > 0 && _totalExecutions % 100 == 0)
             {
                 var stats = GetStats();
-                _logger.LogInfo($"Script execution stats: Total={stats.TotalExecutions}, Active={stats.ActiveExecutions}, " +
+                _logger.LogInformation($"Script execution stats: Total={stats.TotalExecutions}, Active={stats.ActiveExecutions}, " +
                                $"Queued={stats.QueuedExecutions}, Failed={stats.FailedExecutions}, " +
                                $"AvgTime={stats.AverageExecutionTimeMs:F2}ms, Memory={stats.TotalMemoryUsedBytes / 1_048_576}MB");
             }
@@ -320,6 +320,6 @@ public class ScriptExecutionPool : IScriptExecutionPool
         _concurrencyLimiter?.Dispose();
         _poolCancellation?.Dispose();
         
-        _logger.LogInfo("Script execution pool disposed");
+        _logger.LogInformation("Script execution pool disposed");
     }
 }

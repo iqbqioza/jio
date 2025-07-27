@@ -71,7 +71,7 @@ public class LifecycleScriptRunner : ILifecycleScriptRunner
                 return true; // Not an error if script doesn't exist
             }
 
-            _logger.LogInfo("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
+            _logger.LogInformation("Running {0} script in {1}", scriptName, Path.GetFileName(workingDirectory));
             Console.WriteLine($"> {scriptName}");
             Console.WriteLine($"> {scriptCommand}");
 

@@ -55,12 +55,6 @@ public class ConsoleLogger : ILogger
         }
     }
 
-    public void LogInfo(string message, params object[] args)
-    {
-        if (_minLevel <= LogLevel.Info)
-            Log(LogLevel.Info, message, args);
-    }
-
     public void LogInformation(string message, params object[] args)
     {
         if (_minLevel <= LogLevel.Info)

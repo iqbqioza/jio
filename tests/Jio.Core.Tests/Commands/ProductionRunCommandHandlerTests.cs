@@ -6,6 +6,7 @@ using Moq;
 
 namespace Jio.Core.Tests.Commands;
 
+[Collection("Sequential")]
 public class ProductionRunCommandHandlerTests : IDisposable
 {
     private readonly Mock<INodeJsHelper> _nodeJsHelper;
@@ -41,7 +42,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 
@@ -92,7 +114,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 
@@ -127,7 +170,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 
@@ -184,7 +248,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 
@@ -217,7 +302,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 
@@ -249,7 +355,28 @@ public class ProductionRunCommandHandlerTests : IDisposable
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalDirectory);
+            try
+            {
+                if (Directory.Exists(originalDirectory))
+                {
+                    Directory.SetCurrentDirectory(originalDirectory);
+                }
+                else
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Directory.SetCurrentDirectory(Path.GetTempPath());
+                }
+                catch
+                {
+                    // Ignore if we can't set any directory
+                }
+            }
         }
     }
 

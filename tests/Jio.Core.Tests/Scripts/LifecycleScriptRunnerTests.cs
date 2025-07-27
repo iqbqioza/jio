@@ -107,7 +107,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         var result = await _runner.RunScriptAsync("test", _tempDirectory);
         
         result.Should().BeTrue();
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         // Verify each script was logged
         foreach (var script in expectedScripts)
         {
-            _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", script, It.IsAny<string>()), Times.Once);
+            _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", script, It.IsAny<string>()), Times.Once);
         }
     }
 
@@ -226,9 +226,9 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         result.Should().BeFalse();
         
         // Should run pretest and test, but not posttest due to failure
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "pretest", It.IsAny<string>()), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Never);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "pretest", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "test", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Never);
         _loggerMock.Verify(l => l.LogError("Lifecycle script '{0}' failed", "test"), Times.Once);
     }
 
@@ -253,7 +253,7 @@ public sealed class LifecycleScriptRunnerTests : IDisposable
         // Should skip pretest and test (not found), but run posttest
         _loggerMock.Verify(l => l.LogDebug("Script '{0}' not found", "pretest"), Times.Once);
         _loggerMock.Verify(l => l.LogDebug("Script '{0}' not found", "test"), Times.Once);
-        _loggerMock.Verify(l => l.LogInfo("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Once);
+        _loggerMock.Verify(l => l.LogInformation("Running {0} script in {1}", "posttest", It.IsAny<string>()), Times.Once);
     }
 
     [Fact]

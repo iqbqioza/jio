@@ -147,6 +147,56 @@ Run the test script (shortcut for `jio run test`)
 #### `jio start`
 Run the start script (shortcut for `jio run start`)
 
+#### `jio list [pattern]`
+List installed packages (alias: `ls`)
+
+Arguments:
+- `pattern`: Optional pattern to filter packages
+
+Options:
+- `--depth <number>`: Max display depth of the dependency tree (default: 0)
+- `-g`: List global packages
+- `--json`: Output in JSON format
+- `--parseable`: Output parseable results
+
+Example:
+```bash
+jio list           # List direct dependencies
+jio list --depth 2 # Show dependencies up to 2 levels deep
+jio list express   # Filter packages containing "express"
+```
+
+#### `jio outdated`
+Check for outdated packages
+
+Options:
+- `-g`: Check global packages
+- `--json`: Output in JSON format
+- `--depth <number>`: Max depth for checking
+
+Example:
+```bash
+jio outdated       # Check all outdated packages
+jio outdated --json # Output results as JSON
+```
+
+#### `jio exec <command>`
+Execute a command from installed packages
+
+Arguments:
+- `command`: Command to execute
+- `--`: Arguments to pass to the command
+
+Options:
+- `-p`: Execute from package
+- `--call`: Script to execute from package.json
+
+Example:
+```bash
+jio exec tsc       # Execute TypeScript compiler
+jio exec eslint -- --fix src/  # Run eslint with arguments
+```
+
 ## Architecture
 
 jio uses a content-addressable store similar to pnpm, storing packages once and creating hard links to `node_modules`. This approach significantly reduces disk usage when working with multiple projects.
@@ -161,6 +211,8 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **.npmrc Support**: Reads configuration from project, user, and global .npmrc files
 - **Scoped Packages**: Support for @scope/package with per-scope registries
 - **Authentication**: Bearer token authentication for private registries
+- **Package Cache**: Downloaded packages are cached to speed up subsequent installs
+- **Direct Execution**: Run scripts and executables without prefixing with `jio run`
 
 ### Directory Structure
 

@@ -6,6 +6,7 @@ using Jio.Core.Registry;
 using Jio.Core.Resolution;
 using Jio.Core.Storage;
 using Jio.Core.Http;
+using Jio.Core.Cache;
 
 var services = new ServiceCollection();
 
@@ -21,12 +22,16 @@ services.AddSingleton<HttpClient>(sp =>
 });
 services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
+services.AddSingleton<IPackageCache, FileSystemPackageCache>();
 services.AddScoped<IDependencyResolver, DependencyResolver>();
 services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();
 services.AddScoped<ICommandHandler<InitCommand>, InitCommandHandler>();
 services.AddScoped<ICommandHandler<RunCommand>, RunCommandHandler>();
 services.AddScoped<ICommandHandler<UninstallCommand>, UninstallCommandHandler>();
 services.AddScoped<ICommandHandler<UpdateCommand>, UpdateCommandHandler>();
+services.AddScoped<ICommandHandler<ListCommand>, ListCommandHandler>();
+services.AddScoped<ICommandHandler<OutdatedCommand>, OutdatedCommandHandler>();
+services.AddScoped<ICommandHandler<ExecCommand>, ExecCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 
 var serviceProvider = services.BuildServiceProvider();
@@ -178,5 +183,113 @@ addCommand.SetHandler(async (string? package) =>
     Environment.Exit(exitCode);
 }, packageArgument);
 rootCommand.AddCommand(addCommand);
+
+// List command
+var listCommand = new Command("list", "List installed packages");
+listCommand.AddAlias("ls");
+var listDepthOption = new Option<int>("--depth", () => 0, "Max display depth of the dependency tree");
+var listGlobalOption = new Option<bool>("-g", "List global packages");
+var listJsonOption = new Option<bool>("--json", "Output in JSON format");
+var listParseableOption = new Option<bool>("--parseable", "Output parseable results");
+var listPatternArgument = new Argument<string?>("pattern", () => null, "Pattern to filter packages");
+listCommand.AddOption(listDepthOption);
+listCommand.AddOption(listGlobalOption);
+listCommand.AddOption(listJsonOption);
+listCommand.AddOption(listParseableOption);
+listCommand.AddArgument(listPatternArgument);
+listCommand.SetHandler(async (int depth, bool global, bool json, bool parseable, string? pattern) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<ListCommand>>();
+    var exitCode = await handler.ExecuteAsync(new ListCommand 
+    { 
+        Depth = depth,
+        Global = global,
+        Json = json,
+        Parseable = parseable,
+        Pattern = pattern
+    });
+    Environment.Exit(exitCode);
+}, listDepthOption, listGlobalOption, listJsonOption, listParseableOption, listPatternArgument);
+rootCommand.AddCommand(listCommand);
+
+// Outdated command
+var outdatedCommand = new Command("outdated", "Check for outdated packages");
+var outdatedGlobalOption = new Option<bool>("-g", "Check global packages");
+var outdatedJsonOption = new Option<bool>("--json", "Output in JSON format");
+var outdatedDepthOption = new Option<int>("--depth", () => int.MaxValue, "Max depth for checking");
+outdatedCommand.AddOption(outdatedGlobalOption);
+outdatedCommand.AddOption(outdatedJsonOption);
+outdatedCommand.AddOption(outdatedDepthOption);
+outdatedCommand.SetHandler(async (bool global, bool json, int depth) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<OutdatedCommand>>();
+    var exitCode = await handler.ExecuteAsync(new OutdatedCommand 
+    { 
+        Global = global,
+        Json = json,
+        Depth = depth
+    });
+    Environment.Exit(exitCode);
+}, outdatedGlobalOption, outdatedJsonOption, outdatedDepthOption);
+rootCommand.AddCommand(outdatedCommand);
+
+// Exec command
+var execCommand = new Command("exec", "Execute a command");
+var execCommandArgument = new Argument<string>("command", "Command to execute");
+var execArgsOption = new Option<string[]>("--", "Arguments to pass to the command") { AllowMultipleArgumentsPerToken = true };
+var execPackageOption = new Option<bool>("-p", "Execute from package");
+var execCallOption = new Option<string?>("--call", "Script to execute from package.json");
+execCommand.AddArgument(execCommandArgument);
+execCommand.AddOption(execArgsOption);
+execCommand.AddOption(execPackageOption);
+execCommand.AddOption(execCallOption);
+execCommand.SetHandler(async (string command, string[] args, bool package, string? call) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<ExecCommand>>();
+    var exitCode = await handler.ExecuteAsync(new ExecCommand 
+    { 
+        Command = command,
+        Arguments = args?.ToList() ?? [],
+        Package = package,
+        Call = call
+    });
+    Environment.Exit(exitCode);
+}, execCommandArgument, execArgsOption, execPackageOption, execCallOption);
+rootCommand.AddCommand(execCommand);
+
+// Support for direct command execution (npm/yarn/pnpm style)
+// Check if first argument is not a known command
+if (args.Length > 0)
+{
+    var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
+                                "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
+                                "outdated", "exec", "--help", "-h", "--version" };
+    
+    if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
+    {
+        // Try to run as script first
+        var runHandler = serviceProvider.GetRequiredService<ICommandHandler<RunCommand>>();
+        var runResult = await runHandler.ExecuteAsync(new RunCommand 
+        { 
+            Script = args[0],
+            Args = args.Skip(1).ToList()
+        });
+        
+        if (runResult == 0)
+        {
+            return 0;
+        }
+        
+        // If not a script, try exec
+        var execHandler = serviceProvider.GetRequiredService<ICommandHandler<ExecCommand>>();
+        var execResult = await execHandler.ExecuteAsync(new ExecCommand 
+        { 
+            Command = args[0],
+            Arguments = args.Skip(1).ToList()
+        });
+        
+        return execResult;
+    }
+}
 
 return await rootCommand.InvokeAsync(args);

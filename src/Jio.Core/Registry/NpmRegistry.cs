@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Jio.Core.Configuration;
 using Jio.Core.Models;
+using Jio.Core.Cache;
 
 namespace Jio.Core.Registry;
 
@@ -9,12 +10,14 @@ public sealed class NpmRegistry : IPackageRegistry
 {
     private readonly HttpClient _httpClient;
     private readonly JioConfiguration _configuration;
+    private readonly IPackageCache _cache;
     private readonly JsonSerializerOptions _jsonOptions;
     
-    public NpmRegistry(HttpClient httpClient, JioConfiguration configuration)
+    public NpmRegistry(HttpClient httpClient, JioConfiguration configuration, IPackageCache cache)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _cache = cache;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -63,6 +66,17 @@ public sealed class NpmRegistry : IPackageRegistry
     
     public async Task<Stream> DownloadPackageAsync(string name, string version, CancellationToken cancellationToken = default)
     {
+        // First get the integrity hash
+        var integrity = await GetPackageIntegrityAsync(name, version, cancellationToken);
+        
+        // Check cache first
+        var cachedStream = await _cache.GetAsync(name, version, integrity, cancellationToken);
+        if (cachedStream != null)
+        {
+            return cachedStream;
+        }
+        
+        // Download from registry
         var registry = GetRegistryForPackage(name);
         var manifestUrl = $"{registry}{name}/{version}";
         
@@ -85,7 +99,27 @@ public sealed class NpmRegistry : IPackageRegistry
         var tarballResponse = await _httpClient.SendAsync(tarballRequest, cancellationToken);
         tarballResponse.EnsureSuccessStatusCode();
         
-        return await tarballResponse.Content.ReadAsStreamAsync(cancellationToken);
+        // Save to cache
+        var packageStream = await tarballResponse.Content.ReadAsStreamAsync(cancellationToken);
+        var memoryStream = new MemoryStream();
+        await packageStream.CopyToAsync(memoryStream, cancellationToken);
+        memoryStream.Seek(0, SeekOrigin.Begin);
+        
+        // Save to cache in background
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var cacheStream = new MemoryStream(memoryStream.ToArray());
+                await _cache.PutAsync(name, version, integrity, cacheStream, CancellationToken.None);
+            }
+            catch
+            {
+                // Ignore cache errors
+            }
+        });
+        
+        return memoryStream;
     }
     
     public async Task<string> GetPackageIntegrityAsync(string name, string version, CancellationToken cancellationToken = default)

@@ -4,6 +4,7 @@ using FluentAssertions;
 using Jio.Core.Configuration;
 using Jio.Core.Models;
 using Jio.Core.Registry;
+using Jio.Core.Cache;
 using Moq;
 using Moq.Protected;
 
@@ -24,7 +25,8 @@ public class NpmRegistryTests
         {
             Registry = "https://registry.npmjs.org/"
         };
-        _registry = new NpmRegistry(_httpClient, _configuration);
+        var mockCache = new Mock<IPackageCache>();
+        _registry = new NpmRegistry(_httpClient, _configuration, mockCache.Object);
     }
 
     [Fact]

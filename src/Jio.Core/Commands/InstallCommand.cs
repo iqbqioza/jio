@@ -8,6 +8,10 @@ using Jio.Core.Lock;
 using Jio.Core.Scripts;
 using Jio.Core.Logging;
 using Jio.Core.Telemetry;
+using Jio.Core.Configuration;
+using Jio.Core.Patches;
+using Jio.Core.ZeroInstalls;
+using Jio.Core.Security;
 
 namespace Jio.Core.Commands;
 
@@ -18,6 +22,8 @@ public sealed class InstallCommand
     public bool SaveOptional { get; init; }
     public bool SaveExact { get; init; }
     public bool Global { get; init; }
+    public string? Filter { get; init; }
+    public bool Focus { get; init; }
 }
 
 public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
@@ -28,6 +34,7 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
     private readonly ILifecycleScriptRunner _scriptRunner;
     private readonly ILogger _logger;
     private readonly ITelemetryService _telemetry;
+    private readonly ISignatureVerifier _signatureVerifier;
     private readonly JsonSerializerOptions _jsonOptions;
     
     public InstallCommandHandler(
@@ -35,13 +42,15 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         IDependencyResolver resolver,
         IPackageStore store,
         ILogger logger,
-        ITelemetryService telemetry)
+        ITelemetryService telemetry,
+        ISignatureVerifier signatureVerifier)
     {
         _registry = registry;
         _resolver = resolver;
         _store = store;
         _logger = logger;
         _telemetry = telemetry;
+        _signatureVerifier = signatureVerifier;
         _scriptRunner = new LifecycleScriptRunner(logger);
         _jsonOptions = new JsonSerializerOptions
         {
@@ -127,6 +136,10 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         // Create node_modules structure
         await CreateNodeModulesAsync(graph, cancellationToken);
         
+        // Apply patches if any
+        var patchManager = new PatchManager(_logger);
+        await patchManager.ApplyAllPatchesAsync(Path.Combine(Directory.GetCurrentDirectory(), "node_modules"), cancellationToken);
+        
         // Run install scripts for each installed package
         var nodeModules = Path.Combine(currentDir, "node_modules");
         foreach (var package in graph.Packages.Values)
@@ -138,6 +151,10 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         
         // Write lock file
         await WriteLockFileAsync(graph, cancellationToken);
+        
+        // Create zero-installs archive if enabled
+        var zeroInstallsManager = new ZeroInstallsManager(_logger, _store, config);
+        await zeroInstallsManager.CreateZeroInstallsArchiveAsync(graph, cancellationToken);
         
         // Run postinstall scripts
         await _scriptRunner.RunScriptAsync("install", currentDir, cancellationToken);
@@ -162,6 +179,16 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
             
             Console.WriteLine($"Downloading {package.Name}@{package.Version}...");
             using var stream = await _registry.DownloadPackageAsync(package.Name, package.Version, cancellationToken);
+            
+            // Verify signature if enabled
+            var signatureValid = await _signatureVerifier.VerifyPackageSignatureAsync(package.Name, package.Version, stream, cancellationToken);
+            if (!signatureValid)
+            {
+                _logger.LogWarning($"Signature verification failed for {package.Name}@{package.Version}");
+                // In strict mode, this would throw an exception
+                // For now, just log a warning and continue
+            }
+            
             await _store.AddPackageAsync(package.Name, package.Version, stream, cancellationToken);
         }
         finally
@@ -181,21 +208,127 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
         
         Directory.CreateDirectory(nodeModules);
         
-        var tasks = new List<Task>();
+        // Get configuration to check if strict mode is enabled
+        var config = JioConfiguration.CreateWithNpmrcAsync(cancellationToken).Result;
+        
+        if (config.StrictNodeModules && config.UseSymlinks)
+        {
+            // Strict node_modules mode (similar to pnpm)
+            await CreateStrictNodeModulesAsync(graph, nodeModules, cancellationToken);
+        }
+        else
+        {
+            // Standard hoisted mode
+            var tasks = new List<Task>();
+            foreach (var package in graph.Packages.Values)
+            {
+                var targetPath = Path.Combine(nodeModules, package.Name);
+                tasks.Add(_store.LinkPackageAsync(package.Name, package.Version, targetPath, cancellationToken));
+            }
+            
+            await Task.WhenAll(tasks);
+        }
+    }
+    
+    private async Task CreateStrictNodeModulesAsync(DependencyGraph graph, string nodeModules, CancellationToken cancellationToken)
+    {
+        // Create .jio directory for actual packages
+        var jioDir = Path.Combine(nodeModules, ".jio");
+        Directory.CreateDirectory(jioDir);
+        
+        // Install all packages to .jio directory with version suffixes
+        var packageLocations = new Dictionary<string, string>();
+        
         foreach (var package in graph.Packages.Values)
         {
-            var targetPath = Path.Combine(nodeModules, package.Name);
-            tasks.Add(_store.LinkPackageAsync(package.Name, package.Version, targetPath, cancellationToken));
+            var versionedName = $"{package.Name}@{package.Version}".Replace("/", "+");
+            var targetPath = Path.Combine(jioDir, versionedName);
+            
+            await _store.LinkPackageAsync(package.Name, package.Version, targetPath, cancellationToken);
+            packageLocations[$"{package.Name}@{package.Version}"] = targetPath;
         }
         
-        await Task.WhenAll(tasks);
+        // Create symlinks for direct dependencies only
+        var manifest = await PackageManifest.LoadAsync(Path.Combine(Directory.GetCurrentDirectory(), "package.json"));
+        var directDeps = new HashSet<string>();
+        
+        if (manifest.Dependencies != null)
+        {
+            foreach (var dep in manifest.Dependencies.Keys)
+            {
+                directDeps.Add(dep);
+            }
+        }
+        
+        if (manifest.DevDependencies != null)
+        {
+            foreach (var dep in manifest.DevDependencies.Keys)
+            {
+                directDeps.Add(dep);
+            }
+        }
+        
+        if (manifest.OptionalDependencies != null)
+        {
+            foreach (var dep in manifest.OptionalDependencies.Keys)
+            {
+                directDeps.Add(dep);
+            }
+        }
+        
+        // Create symlinks for direct dependencies
+        foreach (var packageName in directDeps)
+        {
+            var package = graph.Packages.Values.FirstOrDefault(p => p.Name == packageName);
+            if (package != null)
+            {
+                var sourcePath = packageLocations[$"{package.Name}@{package.Version}"];
+                var linkPath = Path.Combine(nodeModules, packageName);
+                
+                CreateSymbolicLink(linkPath, sourcePath);
+                
+                // Create nested node_modules for transitive dependencies
+                await CreateNestedNodeModulesAsync(package, graph, packageLocations, cancellationToken);
+            }
+        }
+    }
+    
+    private async Task CreateNestedNodeModulesAsync(
+        ResolvedPackage package, 
+        DependencyGraph graph, 
+        Dictionary<string, string> packageLocations,
+        CancellationToken cancellationToken)
+    {
+        if (package.Dependencies == null || !package.Dependencies.Any())
+        {
+            return;
+        }
+        
+        var packagePath = packageLocations[$"{package.Name}@{package.Version}"];
+        var nestedNodeModules = Path.Combine(packagePath, "node_modules");
+        Directory.CreateDirectory(nestedNodeModules);
+        
+        foreach (var (depName, depVersion) in package.Dependencies)
+        {
+            var dep = graph.Packages.Values.FirstOrDefault(p => p.Name == depName);
+            if (dep != null)
+            {
+                var sourcePath = packageLocations[$"{dep.Name}@{dep.Version}"];
+                var linkPath = Path.Combine(nestedNodeModules, depName);
+                
+                if (!Directory.Exists(linkPath))
+                {
+                    CreateSymbolicLink(linkPath, sourcePath);
+                }
+            }
+        }
     }
     
     private async Task WriteLockFileAsync(DependencyGraph graph, CancellationToken cancellationToken)
     {
         var lockFile = new LockFile
         {
-            Packages = graph.Packages.ToDictionary(
+            Dependencies = graph.Packages.ToDictionary(
                 kvp => kvp.Key,
                 kvp => new LockFilePackage
                 {
@@ -207,6 +340,14 @@ public sealed class InstallCommandHandler : ICommandHandler<InstallCommand>
                     Optional = kvp.Value.Optional
                 })
         };
+        
+        // Optimize lock file if enabled
+        var config = await JioConfiguration.CreateWithNpmrcAsync(cancellationToken);
+        if (config.DeltaUpdates) // Reuse delta updates flag for lockfile optimization
+        {
+            var optimizer = new LockFileOptimizer(_logger);
+            lockFile = await optimizer.OptimizeLockFileAsync(lockFile, cancellationToken);
+        }
         
         var lockFileJson = JsonSerializer.Serialize(lockFile, _jsonOptions);
         await File.WriteAllTextAsync("jio-lock.json", lockFileJson, cancellationToken);
@@ -432,7 +573,39 @@ exec node ""{targetPath}"" ""$@""
             return 1;
         }
         
-        Console.WriteLine($"Found {workspaces.Count} workspaces:");
+        // Apply filter if specified
+        if (!string.IsNullOrEmpty(command.Filter) || command.Focus)
+        {
+            var filterPattern = command.Filter ?? Path.GetFileName(Directory.GetCurrentDirectory());
+            workspaces = workspaces.Where(w => 
+                w.Name.Contains(filterPattern, StringComparison.OrdinalIgnoreCase) ||
+                w.RelativePath.Contains(filterPattern, StringComparison.OrdinalIgnoreCase)).ToList();
+                
+            if (!workspaces.Any())
+            {
+                Console.WriteLine($"No workspaces match filter: {filterPattern}");
+                return 1;
+            }
+            
+            // For focused install, include dependencies of filtered workspaces
+            if (command.Focus)
+            {
+                var focusedWorkspaces = new HashSet<string>(workspaces.Select(w => w.Name));
+                var additionalWorkspaces = new HashSet<string>();
+                
+                foreach (var workspace in workspaces)
+                {
+                    await CollectWorkspaceDependenciesAsync(workspace, workspaceManager, additionalWorkspaces, cancellationToken);
+                }
+                
+                // Add additional workspaces
+                var allWorkspaces = await workspaceManager.GetWorkspacesAsync(cancellationToken);
+                workspaces = allWorkspaces.Where(w => 
+                    focusedWorkspaces.Contains(w.Name) || additionalWorkspaces.Contains(w.Name)).ToList();
+            }
+        }
+        
+        Console.WriteLine($"Installing {workspaces.Count} workspace(s):");
         foreach (var workspace in workspaces)
         {
             Console.WriteLine($"  - {workspace.Name} ({workspace.RelativePath})");
@@ -664,5 +837,54 @@ exec node ""{targetPath}"" ""$@""
         }
         
         return null;
+    }
+    
+    private async Task CollectWorkspaceDependenciesAsync(
+        WorkspaceInfo workspace,
+        WorkspaceManager manager,
+        HashSet<string> collected,
+        CancellationToken cancellationToken)
+    {
+        // Get all dependencies that use workspace: protocol
+        var workspaceDeps = new List<string>();
+        
+        if (workspace.Manifest.Dependencies != null)
+        {
+            foreach (var (name, version) in workspace.Manifest.Dependencies)
+            {
+                if (version.StartsWith("workspace:"))
+                {
+                    workspaceDeps.Add(name);
+                }
+            }
+        }
+        
+        if (workspace.Manifest.DevDependencies != null)
+        {
+            foreach (var (name, version) in workspace.Manifest.DevDependencies)
+            {
+                if (version.StartsWith("workspace:"))
+                {
+                    workspaceDeps.Add(name);
+                }
+            }
+        }
+        
+        // Add workspace dependencies to collected set
+        foreach (var depName in workspaceDeps)
+        {
+            if (!collected.Contains(depName))
+            {
+                collected.Add(depName);
+                
+                // Recursively collect dependencies
+                var allWorkspaces = await manager.GetWorkspacesAsync(cancellationToken);
+                var depWorkspace = allWorkspaces.FirstOrDefault(w => w.Name == depName);
+                if (depWorkspace != null)
+                {
+                    await CollectWorkspaceDependenciesAsync(depWorkspace, manager, collected, cancellationToken);
+                }
+            }
+        }
     }
 }

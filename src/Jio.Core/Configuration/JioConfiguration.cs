@@ -15,6 +15,11 @@ public sealed class JioConfiguration
     public string? UserAgent { get; set; }
     public int MaxConcurrentDownloads { get; set; } = 10;
     public bool UseHardLinks { get; set; } = true;
+    public bool UseSymlinks { get; set; } = false;
+    public bool StrictNodeModules { get; set; } = false;
+    public bool ZeroInstalls { get; set; } = false;
+    public bool DeltaUpdates { get; set; } = false;
+    public bool VerifySignatures { get; set; } = false;
     public bool VerifyIntegrity { get; set; } = true;
     public TimeSpan HttpTimeout { get; set; } = TimeSpan.FromMinutes(5);
     public int? MaxRetries { get; set; } = 3;

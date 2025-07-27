@@ -360,84 +360,144 @@ This command:
 - Faster than regular install for CI/CD environments
 - Ensures reproducible builds
 
+#### `jio prune`
+Remove extraneous packages not listed in package.json
+
+Options:
+- `--production`: Remove packages not in dependencies
+- `--dry-run`: Show what would be removed without removing
+- `--json`: Output results in JSON format
+
+Example:
+```bash
+jio prune               # Remove extraneous packages
+jio prune --production  # Remove dev dependencies
+jio prune --dry-run     # Preview what would be removed
+```
+
+#### `jio dedupe`
+Reduce duplication by deduplicating packages
+
+Options:
+- `--dry-run`: Show what would be done without doing it
+- `--json`: Output results in JSON format
+
+Arguments:
+- `package`: Optional specific package to deduplicate
+
+Example:
+```bash
+jio dedupe              # Deduplicate all packages
+jio dedupe lodash       # Deduplicate only lodash
+jio dedupe --dry-run    # Preview deduplication
+```
+
+#### `jio patch <package>`
+Create and manage patches for dependencies
+
+Arguments:
+- `package`: Package to patch
+
+Options:
+- `--create`: Create a new patch
+- `--edit-dir`: Directory to edit the package in
+
+Example:
+```bash
+jio patch express --create        # Create a new patch for express
+jio patch express                 # Edit existing patch
+jio patch lodash --edit-dir /tmp  # Edit in specific directory
+```
+
+Patches are automatically applied during `jio install`
+
 ## Feature Comparison
 
-| Feature | npm | Yarn v1 | Yarn Berry | jio |
-|---------|-----|---------|------------|-----|
+| Feature | npm | Yarn v1 | Yarn Berry | PNPM | jio |
+|---------|-----|---------|------------|------|-----|
 | **Basic Commands** |
-| `install` | ✓ | ✓ | ✓ | ✓ |
-| `add` / `install <pkg>` | ✓ | ✓ | ✓ | ✓ |
-| `remove` / `uninstall` | ✓ | ✓ | ✓ | ✓ |
-| `update` | ✓ | ✓ | ✓ | ✓ |
-| `init` | ✓ | ✓ | ✓ | ✓ |
-| `run <script>` | ✓ | ✓ | ✓ | ✓ |
-| `test` | ✓ | ✓ | ✓ | ✓ |
-| `publish` | ✓ | ✓ | ✓ | ✓ |
-| `pack` | ✓ | ✓ | ✓ | ✗ |
-| `version` | ✓ | ✓ | ✓ | ✗ |
+| `install` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `add` / `install <pkg>` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `remove` / `uninstall` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `update` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `init` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `run <script>` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `test` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `publish` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pack` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `version` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Advanced Commands** |
-| `ci` (clean install) | ✓ | ✗ | ✗ | ✓ |
-| `audit` | ✓ | ✓ | ✓ | ✓ |
-| `npx` / `dlx` | ✓ (npx) | ✗ | ✓ (dlx) | ✓ (dlx) |
-| `why` | ✗ | ✓ | ✓ | ✓ |
-| `list` / `ls` | ✓ | ✓ | ✓ | ✓ |
-| `outdated` | ✓ | ✓ | ✓ | ✓ |
-| `link` | ✓ | ✓ | ✓ | ✓ |
+| `ci` (clean install) | ✅ | ❌ | ❌ | ✅ | ✅ |
+| `audit` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `npx` / `dlx` / `exec` | ✅ (npx) | ❌ | ✅ (dlx) | ✅ (exec/dlx) | ✅ (dlx) |
+| `why` | ❌ | ✅ | ✅ | ✅ | ✅ |
+| `list` / `ls` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `outdated` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `link` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `prune` | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `dedupe` | ✅ | ✅ | ❌ | ❌ | ✅ |
 | **Lock Files** |
-| Lock file format | package-lock.json | yarn.lock | yarn.lock (v2) | jio-lock.json |
-| Import npm lock | - | ✗ | ✗ | ✓ |
-| Import yarn v1 lock | ✗ | - | ✓ | ✓ |
-| Import yarn berry lock | ✗ | ✗ | - | ✓ |
-| Import pnpm lock | ✗ | ✗ | ✗ | ✓ |
-| Export to npm format | - | ✗ | ✗ | ✓ |
-| Export to yarn format | ✗ | - | ✗ | ✓ |
-| Export to pnpm format | ✗ | ✗ | ✗ | ✓ |
+| Lock file format | package-lock.json | yarn.lock | yarn.lock (v2) | pnpm-lock.yaml | jio-lock.json |
+| Import npm lock | - | ❌ | ❌ | ✅ | ✅ |
+| Import yarn v1 lock | ❌ | - | ✅ | ✅ | ✅ |
+| Import yarn berry lock | ❌ | ❌ | - | ❌ | ✅ |
+| Import pnpm lock | ❌ | ❌ | ❌ | - | ✅ |
+| Export to npm format | - | ❌ | ❌ | ❌ | ✅ |
+| Export to yarn format | ❌ | - | ❌ | ❌ | ✅ |
+| Export to pnpm format | ❌ | ❌ | ❌ | - | ✅ |
 | **Storage** |
-| Flat node_modules | ✓ | ✓ | ✗ (PnP) | ✓ |
-| Hoisted dependencies | ✓ | ✓ | N/A | ✓ |
-| Content-addressable store | ✗ | ✗ | ✓ (PnP) | ✓ |
-| Hard links | ✗ | ✗ | ✗ | ✓ |
-| Zero-installs | ✗ | ✗ | ✓ | ✗ |
+| Flat node_modules | ✅ | ✅ | ❌ (PnP) | ❌ | ✅ |
+| Hoisted dependencies | ✅ | ✅ | N/A | ❌ | ✅ |
+| Content-addressable store | ❌ | ❌ | ✅ (PnP) | ✅ | ✅ |
+| Hard links | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Symlinks | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Zero-installs | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Strict node_modules | ❌ | ❌ | ❌ | ✅ | ✅ |
 | **Performance** |
-| Parallel downloads | ✓ | ✓ | ✓ | ✓ |
-| Offline cache | ✓ | ✓ | ✓ | ✓ |
-| Delta updates | ✗ | ✗ | ✓ | ✗ |
+| Parallel downloads | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Offline cache | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Delta updates | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Lockfile optimization | ❌ | ❌ | ✅ | ✅ | ✅ |
 | **Workspaces** |
-| Workspace support | ✓ | ✓ | ✓ | ✓ |
-| workspace: protocol | ✓ | ✓ | ✓ | ✓ |
-| Topological install | ✓ | ✓ | ✓ | ✓ |
-| Focused workspaces | ✗ | ✗ | ✓ | ✗ |
+| Workspace support | ✅ | ✅ | ✅ | ✅ | ✅ |
+| workspace: protocol | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Topological install | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Focused workspaces | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Filtering workspaces | ❌ | ✅ | ✅ | ✅ | ✅ |
 | **Security** |
-| Integrity verification | ✓ | ✓ | ✓ | ✓ |
-| Security audit | ✓ | ✓ | ✓ | ✓ |
-| Auto fix vulnerabilities | ✓ | ✗ | ✗ | ✓ |
+| Integrity verification | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Security audit | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Auto fix vulnerabilities | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Signatures verification | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Registry** |
-| npm registry | ✓ | ✓ | ✓ | ✓ |
-| Private registries | ✓ | ✓ | ✓ | ✓ |
-| Scoped registries | ✓ | ✓ | ✓ | ✓ |
-| .npmrc support | ✓ | ✓ | ✓ | ✓ |
+| npm registry | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Private registries | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Scoped registries | ✅ | ✅ | ✅ | ✅ | ✅ |
+| .npmrc support | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Scripts** |
-| Lifecycle scripts | ✓ | ✓ | ✓ | ✓ |
-| Pre/post scripts | ✓ | ✓ | ✓ | ✓ |
-| Custom scripts | ✓ | ✓ | ✓ | ✓ |
-| Script arguments | ✓ | ✓ | ✓ | ✓ |
+| Lifecycle scripts | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Pre/post scripts | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Custom scripts | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Script arguments | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Shell fallback | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Dependencies** |
-| Git dependencies | ✓ | ✓ | ✓ | ✗ |
-| File dependencies | ✓ | ✓ | ✓ | ✗ |
-| Link protocol | ✓ | ✓ | ✓ | ✗ |
-| Peer dependencies | ✓ | ✓ | ✓ | ✓ |
-| Optional dependencies | ✓ | ✓ | ✓ | ✓ |
-| Overrides/resolutions | ✓ | ✓ (resolutions) | ✓ | ✗ |
+| Git dependencies | ✅ | ✅ | ✅ | ✅ | ✅ |
+| File dependencies | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Link protocol | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Peer dependencies | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Optional dependencies | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Overrides/resolutions | ✅ | ✅ (resolutions) | ✅ | ✅ (overrides) | ✅ |
+| Patch dependencies | ❌ | ❌ | ✅ | ✅ (pnpm patch) | ✅ |
 | **Production Features** |
-| HTTP retry mechanism | ✓ | ✓ | ✓ | ✓ |
-| Proxy support | ✓ | ✓ | ✓ | ✓ |
-| Structured logging | ✗ | ✗ | ✗ | ✓ |
-| Health checks | ✗ | ✗ | ✗ | ✓ |
-| Telemetry/Metrics | ✗ | ✗ | ✗ | ✓ |
+| HTTP retry mechanism | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Proxy support | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Structured logging | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Health checks | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Telemetry/Metrics | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **Platform** |
-| Node.js required | ✓ | ✓ | ✓ | ✗ |
-| Self-contained binary | ✗ | ✗ | ✗ | ✓ |
-| Cross-platform | ✓ | ✓ | ✓ | ✓ |
+| Node.js required | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Self-contained binary | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Cross-platform | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### Key Differences
 
@@ -445,9 +505,12 @@ This command:
 - **jio** uses content-addressable storage with hard links similar to pnpm
 - **jio** can import and export lock files from all major package managers
 - **jio** includes production-ready features like structured logging and health checks
+- **jio** supports all major package manager features including patches, strict mode, and zero-installs
+- **jio** includes advanced security features like signature verification
+- **PNPM** uses a unique node_modules structure with symlinks for strict dependency isolation
 - **Yarn Berry** uses Plug'n'Play (PnP) instead of node_modules
 - **npm** is the reference implementation with the most features
-- Some advanced features like git dependencies are not yet implemented in jio
+- **jio** now implements all essential features for modern JavaScript package management
 
 ## Architecture
 
@@ -587,7 +650,43 @@ For monorepo/workspace support, add a `workspaces` field to your root `package.j
 }
 ```
 
-#### Using workspace: protocol
+#### Advanced Options
+
+#### Symlinks and Strict Mode
+
+jio supports both symlinks and strict node_modules layout (similar to pnpm):
+
+```bash
+# Enable symlinks (requires admin rights on Windows)
+echo "use-symlinks=true" >> .npmrc
+
+# Enable strict node_modules (requires symlinks)
+echo "strict-node-modules=true" >> .npmrc
+```
+
+With strict mode enabled, only direct dependencies are accessible from your code, preventing phantom dependencies.
+
+#### Zero-Installs and Advanced Features
+
+Enable advanced features for improved performance and security:
+
+```bash
+# Enable zero-installs (cache packages for offline use)
+echo "zero-installs=true" >> .npmrc
+
+# Enable delta updates (faster package updates)
+echo "delta-updates=true" >> .npmrc
+
+# Enable signature verification (enhanced security)
+echo "verify-signatures=true" >> .npmrc
+```
+
+These features provide:
+- **Zero-installs**: Packages are cached and can be used offline
+- **Delta updates**: Only download changes between package versions
+- **Signature verification**: Verify package authenticity and integrity
+
+### Using workspace: protocol
 
 You can reference workspace packages using the `workspace:` protocol:
 

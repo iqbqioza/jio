@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using Jio.Core.Dependencies;
 using Jio.Core.Models;
 using Jio.Core.Registry;
 using Jio.Core.Workspaces;
+using Jio.Core.Configuration;
+using Jio.Core.Logging;
 
 namespace Jio.Core.Resolution;
 
@@ -11,15 +14,34 @@ public sealed class DependencyResolver : IDependencyResolver
     private readonly ConcurrentDictionary<string, ResolvedPackage> _resolvedPackages = new();
     private readonly Dictionary<string, WorkspaceInfo> _workspaces = new();
     private readonly string? _rootPath;
+    private readonly IGitDependencyResolver? _gitResolver;
+    private readonly ILocalDependencyResolver? _localResolver;
+    private readonly IOverrideResolver _overrideResolver;
+    private PackageManifest? _rootManifest;
     
     public DependencyResolver(IPackageRegistry registry)
     {
         _registry = registry;
         _rootPath = Directory.GetCurrentDirectory();
+        _overrideResolver = new OverrideResolver();
+    }
+    
+    public DependencyResolver(
+        IPackageRegistry registry, 
+        JioConfiguration configuration, 
+        ILogger logger)
+    {
+        _registry = registry;
+        _rootPath = Directory.GetCurrentDirectory();
+        _overrideResolver = new OverrideResolver();
+        _gitResolver = new GitDependencyResolver(logger, configuration.CacheDirectory);
+        _localResolver = new LocalDependencyResolver(logger, configuration.CacheDirectory);
     }
     
     public async Task<DependencyGraph> ResolveAsync(PackageManifest manifest, CancellationToken cancellationToken = default)
     {
+        _rootManifest = manifest;
+        
         var graph = new DependencyGraph
         {
             Name = manifest.Name,
@@ -79,6 +101,97 @@ public sealed class DependencyResolver : IDependencyResolver
         if (_resolvedPackages.ContainsKey(key))
             return;
         
+        // Check for special dependency types
+        if (_gitResolver != null && _gitResolver.IsGitDependency(versionRange))
+        {
+            var gitPath = await _gitResolver.ResolveAsync(versionRange, cancellationToken);
+            var gitManifest = await LoadPackageManifestAsync(Path.Combine(gitPath, "package.json"), cancellationToken);
+            
+            var gitPackage = new ResolvedPackage
+            {
+                Name = name,
+                Version = version,
+                Resolved = $"git+{versionRange}",
+                Integrity = "", // Git dependencies don't have pre-computed integrity
+                Dependencies = gitManifest.Dependencies ?? new Dictionary<string, string>(),
+                Dev = isDev,
+                Optional = false
+            };
+            
+            if (_resolvedPackages.TryAdd(key, gitPackage))
+            {
+                // Resolve dependencies
+                var tasks = new List<Task>();
+                foreach (var (depName, depVersion) in gitPackage.Dependencies)
+                {
+                    tasks.Add(ResolvePackageAsync(depName, depVersion, false, graph, cancellationToken));
+                }
+                await Task.WhenAll(tasks);
+            }
+            return;
+        }
+        
+        if (_localResolver != null)
+        {
+            if (_localResolver.IsFileDependency(versionRange))
+            {
+                var filePath = await _localResolver.ResolveFileAsync(versionRange, cancellationToken);
+                var fileManifest = await LoadPackageManifestAsync(Path.Combine(filePath, "package.json"), cancellationToken);
+                
+                var filePackage = new ResolvedPackage
+                {
+                    Name = name,
+                    Version = version,
+                    Resolved = $"file:{versionRange}",
+                    Integrity = "", // File dependencies don't have pre-computed integrity
+                    Dependencies = fileManifest.Dependencies ?? new Dictionary<string, string>(),
+                    Dev = isDev,
+                    Optional = false
+                };
+                
+                if (_resolvedPackages.TryAdd(key, filePackage))
+                {
+                    // Resolve dependencies
+                    var tasks = new List<Task>();
+                    foreach (var (depName, depVersion) in filePackage.Dependencies)
+                    {
+                        tasks.Add(ResolvePackageAsync(depName, depVersion, false, graph, cancellationToken));
+                    }
+                    await Task.WhenAll(tasks);
+                }
+                return;
+            }
+            
+            if (_localResolver.IsLinkDependency(versionRange))
+            {
+                var linkPath = await _localResolver.ResolveLinkAsync(versionRange, cancellationToken);
+                var linkManifest = await LoadPackageManifestAsync(Path.Combine(linkPath, "package.json"), cancellationToken);
+                
+                var linkPackage = new ResolvedPackage
+                {
+                    Name = name,
+                    Version = version,
+                    Resolved = $"link:{versionRange}",
+                    Integrity = "", // Link dependencies don't have integrity
+                    Dependencies = linkManifest.Dependencies ?? new Dictionary<string, string>(),
+                    Dev = isDev,
+                    Optional = false
+                };
+                
+                if (_resolvedPackages.TryAdd(key, linkPackage))
+                {
+                    // Resolve dependencies
+                    var tasks = new List<Task>();
+                    foreach (var (depName, depVersion) in linkPackage.Dependencies)
+                    {
+                        tasks.Add(ResolvePackageAsync(depName, depVersion, false, graph, cancellationToken));
+                    }
+                    await Task.WhenAll(tasks);
+                }
+                return;
+            }
+        }
+        
         // Check if this is a workspace package
         if (_workspaces.TryGetValue(name, out var workspace))
         {
@@ -134,6 +247,36 @@ public sealed class DependencyResolver : IDependencyResolver
     
     private async Task<string> ResolveVersionAsync(string name, string versionRange, CancellationToken cancellationToken)
     {
+        // Check for overrides/resolutions first
+        if (_rootManifest != null)
+        {
+            var overrideVersion = _overrideResolver.GetOverride(name, versionRange, _rootManifest);
+            if (!string.IsNullOrEmpty(overrideVersion))
+            {
+                versionRange = overrideVersion;
+            }
+        }
+        
+        // Handle special dependency types
+        if (_gitResolver != null && _gitResolver.IsGitDependency(versionRange))
+        {
+            // Git dependencies don't have traditional versions
+            return $"git-{versionRange.GetHashCode():X}";
+        }
+        
+        if (_localResolver != null)
+        {
+            if (_localResolver.IsFileDependency(versionRange))
+            {
+                return $"file-{versionRange.GetHashCode():X}";
+            }
+            
+            if (_localResolver.IsLinkDependency(versionRange))
+            {
+                return $"link-{versionRange.GetHashCode():X}";
+            }
+        }
+        
         // Handle workspace: protocol
         if (versionRange.StartsWith("workspace:"))
         {
@@ -177,5 +320,15 @@ public sealed class DependencyResolver : IDependencyResolver
         }
         
         return versionRange;
+    }
+    
+    private async Task<PackageManifest> LoadPackageManifestAsync(string path, CancellationToken cancellationToken)
+    {
+        var json = await File.ReadAllTextAsync(path, cancellationToken);
+        return System.Text.Json.JsonSerializer.Deserialize<PackageManifest>(json, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+        }) ?? throw new InvalidOperationException("Failed to parse package.json");
     }
 }

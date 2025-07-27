@@ -11,6 +11,8 @@ using Jio.Core.Logging;
 using Jio.Core.Telemetry;
 using Jio.Core.Monitoring;
 using Jio.Core.Scripts;
+using Jio.Core.Dependencies;
+using Jio.Core.Patches;
 
 var services = new ServiceCollection();
 
@@ -53,7 +55,13 @@ services.AddSingleton<IHealthCheckService, HealthCheckService>();
 services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
 services.AddSingleton<IPackageCache, FileSystemPackageCache>();
-services.AddScoped<IDependencyResolver, DependencyResolver>();
+services.AddScoped<IDependencyResolver>(sp =>
+{
+    var registry = sp.GetRequiredService<IPackageRegistry>();
+    var config = sp.GetRequiredService<JioConfiguration>();
+    var logger = sp.GetRequiredService<ILogger>();
+    return new DependencyResolver(registry, config, logger);
+});
 services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();
 services.AddScoped<ICommandHandler<InitCommand>, InitCommandHandler>();
 services.AddScoped<ICommandHandler<RunCommand>, RunCommandHandler>();
@@ -69,8 +77,28 @@ services.AddScoped<ICommandHandler<SearchCommand>, SearchCommandHandler>();
 services.AddScoped<ICommandHandler<ViewCommand>, ViewCommandHandler>();
 services.AddScoped<ICommandHandler<DlxCommand>, DlxCommandHandler>();
 services.AddScoped<ICommandHandler<CiCommand>, CiCommandHandler>();
+services.AddScoped<ICommandHandler<PackCommand>, PackCommandHandler>();
+services.AddScoped<ICommandHandler<VersionCommand>, VersionCommandHandler>();
+services.AddScoped<ICommandHandler<PruneCommand>, PruneCommandHandler>();
+services.AddScoped<ICommandHandler<DedupeCommand>, DedupeCommandHandler>();
+services.AddScoped<ICommandHandler<PatchCommand>, PatchCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
+services.AddSingleton<IPatchManager, PatchManager>();
+services.AddSingleton<ISignatureVerifier, SignatureVerifier>();
 services.AddSingleton<ILifecycleScriptRunner, LifecycleScriptRunner>();
+services.AddSingleton<IGitDependencyResolver>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger>();
+    var config = sp.GetRequiredService<JioConfiguration>();
+    return new GitDependencyResolver(logger, config.CacheDirectory);
+});
+services.AddSingleton<ILocalDependencyResolver>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger>();
+    var config = sp.GetRequiredService<JioConfiguration>();
+    return new LocalDependencyResolver(logger, config.CacheDirectory);
+});
+services.AddSingleton<IOverrideResolver, OverrideResolver>();
 
 var serviceProvider = services.BuildServiceProvider();
 
@@ -569,6 +597,140 @@ ciCommand.SetHandler(async (bool production) =>
 }, productionOption);
 rootCommand.AddCommand(ciCommand);
 
+// Pack command
+var packCommand = new Command("pack", "Create a tarball from a package");
+var packDirOption = new Option<string?>("--directory", "Directory to pack");
+var dryRunOption = new Option<bool>("--dry-run", "Show what would be packed without creating tarball");
+var packDestOption = new Option<string?>("--destination", "Destination directory for tarball");
+packCommand.AddOption(packDirOption);
+packCommand.AddOption(dryRunOption);
+packCommand.AddOption(packDestOption);
+packCommand.SetHandler(async (string? directory, bool dryRun, string? destination) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<PackCommand>>();
+    var exitCode = await handler.ExecuteAsync(new PackCommand 
+    { 
+        Directory = directory,
+        DryRun = dryRun,
+        Destination = destination
+    });
+    Environment.Exit(exitCode);
+}, packDirOption, dryRunOption, packDestOption);
+rootCommand.AddCommand(packCommand);
+
+// Version command
+var versionCommand = new Command("version", "Bump package version");
+var newVersionArg = new Argument<string?>("new-version", () => null, "New version or increment type");
+var majorOption = new Option<bool>("--major", "Increment major version");
+var minorOption = new Option<bool>("--minor", "Increment minor version");
+var patchOption = new Option<bool>("--patch", "Increment patch version");
+var premajorOption = new Option<bool>("--premajor", "Increment premajor version");
+var preminorOption = new Option<bool>("--preminor", "Increment preminor version");
+var prepatchOption = new Option<bool>("--prepatch", "Increment prepatch version");
+var prereleaseOption = new Option<bool>("--prerelease", "Increment prerelease version");
+var preidOption = new Option<string?>("--preid", "Prerelease identifier");
+var noGitTagOption = new Option<bool>("--no-git-tag-version", "Do not create git tag");
+var messageOption = new Option<string?>("--message", "Custom git tag message");
+versionCommand.AddArgument(newVersionArg);
+versionCommand.AddOption(majorOption);
+versionCommand.AddOption(minorOption);
+versionCommand.AddOption(patchOption);
+versionCommand.AddOption(premajorOption);
+versionCommand.AddOption(preminorOption);
+versionCommand.AddOption(prepatchOption);
+versionCommand.AddOption(prereleaseOption);
+versionCommand.AddOption(preidOption);
+versionCommand.AddOption(noGitTagOption);
+versionCommand.AddOption(messageOption);
+versionCommand.SetHandler(async (string? newVersion, bool major, bool minor, bool patch, 
+    bool premajor, bool preminor, bool prepatch, bool prerelease, 
+    string? preid, bool noGitTag, string? message) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<VersionCommand>>();
+    var exitCode = await handler.ExecuteAsync(new VersionCommand 
+    { 
+        NewVersion = newVersion,
+        Major = major,
+        Minor = minor,
+        Patch = patch,
+        Premajor = premajor,
+        Preminor = preminor,
+        Prepatch = prepatch,
+        Prerelease = prerelease,
+        Preid = preid,
+        NoGitTagVersion = noGitTag,
+        Message = message
+    });
+    Environment.Exit(exitCode);
+}, newVersionArg, majorOption, minorOption, patchOption, 
+   premajorOption, preminorOption, prepatchOption, prereleaseOption,
+   preidOption, noGitTagOption, messageOption);
+rootCommand.AddCommand(versionCommand);
+
+// Prune command
+var pruneCommand = new Command("prune", "Remove extraneous packages not listed in package.json");
+var pruneProductionOption = new Option<bool>("--production", "Remove packages not in dependencies");
+var pruneDryRunOption = new Option<bool>("--dry-run", "Show what would be removed without removing");
+var pruneJsonOption = new Option<bool>("--json", "Output results in JSON format");
+pruneCommand.AddOption(pruneProductionOption);
+pruneCommand.AddOption(pruneDryRunOption);
+pruneCommand.AddOption(pruneJsonOption);
+pruneCommand.SetHandler(async (bool production, bool dryRun, bool json) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<PruneCommand>>();
+    var exitCode = await handler.ExecuteAsync(new PruneCommand 
+    { 
+        Production = production,
+        DryRun = dryRun,
+        Json = json
+    });
+    Environment.Exit(exitCode);
+}, pruneProductionOption, pruneDryRunOption, pruneJsonOption);
+rootCommand.AddCommand(pruneCommand);
+
+// Dedupe command
+var dedupeCommand = new Command("dedupe", "Reduce duplication by moving dependencies up the tree");
+dedupeCommand.AddAlias("ddp");
+var dedupeDryRunOption = new Option<bool>("--dry-run", "Show what would be done without doing it");
+var dedupeJsonOption = new Option<bool>("--json", "Output results in JSON format");
+var dedupePackageArg = new Argument<string?>("package", () => null, "Specific package to deduplicate");
+dedupeCommand.AddOption(dedupeDryRunOption);
+dedupeCommand.AddOption(dedupeJsonOption);
+dedupeCommand.AddArgument(dedupePackageArg);
+dedupeCommand.SetHandler(async (bool dryRun, bool json, string? package) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<DedupeCommand>>();
+    var exitCode = await handler.ExecuteAsync(new DedupeCommand 
+    { 
+        DryRun = dryRun,
+        Json = json,
+        Package = package
+    });
+    Environment.Exit(exitCode);
+}, dedupeDryRunOption, dedupeJsonOption, dedupePackageArg);
+rootCommand.AddCommand(dedupeCommand);
+
+// Patch command
+var patchCommand = new Command("patch", "Create and manage patches for dependencies");
+var patchPackageArg = new Argument<string>("package", "Package to patch");
+var patchCreateOption = new Option<bool>("--create", "Create a new patch");
+var patchEditDirOption = new Option<string?>("--edit-dir", "Directory to edit the package in");
+patchCommand.AddArgument(patchPackageArg);
+patchCommand.AddOption(patchCreateOption);
+patchCommand.AddOption(patchEditDirOption);
+patchCommand.SetHandler(async (string package, bool create, string? editDir) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<PatchCommand>>();
+    var exitCode = await handler.ExecuteAsync(new PatchCommand 
+    { 
+        Package = package,
+        Create = create,
+        EditDir = editDir
+    });
+    Environment.Exit(exitCode);
+}, patchPackageArg, patchCreateOption, patchEditDirOption);
+rootCommand.AddCommand(patchCommand);
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
@@ -576,7 +738,7 @@ if (args.Length > 0)
     var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
                                 "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
                                 "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", 
-                                "dlx", "cache", "config", "why", "ci", "--help", "-h", "--version" };
+                                "dlx", "cache", "config", "why", "ci", "pack", "version", "prune", "dedupe", "ddp", "patch", "--help", "-h", "--version" };
     
     if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
     {

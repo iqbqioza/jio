@@ -73,7 +73,19 @@ public sealed class ContentAddressableStore : IPackageStore
         
         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
         
-        if (_configuration.UseHardLinks && OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        if (_configuration.UseSymlinks && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+        {
+            try
+            {
+                CreateSymbolicLink(sourcePath, targetPath);
+            }
+            catch
+            {
+                // Fallback to hard links if symlinks fail
+                await CreateHardLinksAsync(sourcePath, targetPath, cancellationToken);
+            }
+        }
+        else if (_configuration.UseHardLinks && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             await CreateHardLinksAsync(sourcePath, targetPath, cancellationToken);
         }
@@ -145,6 +157,9 @@ public sealed class ContentAddressableStore : IPackageStore
     [DllImport("libc", SetLastError = true)]
     private static extern int link(string oldpath, string newpath);
     
+    [DllImport("libc", SetLastError = true)]
+    private static extern int symlink(string target, string linkpath);
+    
     private static void CreateHardLink(string source, string target)
     {
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
@@ -158,6 +173,34 @@ public sealed class ContentAddressableStore : IPackageStore
         {
             // Fallback to copy on Windows
             File.Copy(source, target, true);
+        }
+    }
+    
+    private static void CreateSymbolicLink(string source, string target)
+    {
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            if (symlink(source, target) != 0)
+            {
+                throw new IOException($"Failed to create symbolic link from {source} to {target}");
+            }
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            // On Windows, use Directory.CreateSymbolicLink (requires admin rights)
+            try
+            {
+                Directory.CreateSymbolicLink(target, source);
+            }
+            catch
+            {
+                // Fallback to junction point or copy
+                throw new NotSupportedException("Symbolic links not supported on this platform");
+            }
+        }
+        else
+        {
+            throw new NotSupportedException("Symbolic links not supported on this platform");
         }
     }
     

@@ -61,6 +61,15 @@ public sealed class PackageManifest
     [JsonPropertyName("peerDependencies")]
     public Dictionary<string, string>? PeerDependencies { get; init; }
     
+    [JsonPropertyName("overrides")]
+    public Dictionary<string, object>? Overrides { get; init; }
+    
+    [JsonPropertyName("resolutions")]
+    public Dictionary<string, string>? Resolutions { get; init; }
+    
+    [JsonPropertyName("patchedDependencies")]
+    public Dictionary<string, string>? PatchedDependencies { get; init; }
+    
     public async Task SaveAsync(string path)
     {
         var json = System.Text.Json.JsonSerializer.Serialize(this, new System.Text.Json.JsonSerializerOptions

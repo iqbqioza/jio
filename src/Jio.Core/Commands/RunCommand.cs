@@ -4,6 +4,7 @@ using Jio.Core.Models;
 using Jio.Core.Workspaces;
 using Jio.Core.Node;
 using Jio.Core.Logging;
+using Jio.Core.Configuration;
 
 namespace Jio.Core.Commands;
 
@@ -15,6 +16,8 @@ public sealed class RunCommand
     public string? Filter { get; init; }
     public bool Parallel { get; init; }
     public bool Stream { get; init; }
+    public bool Watch { get; init; }
+    public int? MaxRestarts { get; init; }
 }
 
 public sealed class RunCommandHandler : ICommandHandler<RunCommand>
@@ -22,11 +25,13 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly INodeJsHelper _nodeJsHelper;
     private readonly ILogger _logger;
+    private readonly ProcessResilienceConfiguration _resilienceConfig;
     
     public RunCommandHandler(INodeJsHelper nodeJsHelper, ILogger logger)
     {
         _nodeJsHelper = nodeJsHelper;
         _logger = logger;
+        _resilienceConfig = ProcessResilienceDefaults.Development;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -103,8 +108,8 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
         Console.WriteLine($"> {fullCommand}");
         Console.WriteLine();
         
-        // Execute the script
-        var exitCode = await ExecuteScriptAsync(fullCommand, cancellationToken);
+        // Execute the script with monitoring if watch mode is enabled
+        var exitCode = await ExecuteScriptWithOptionsAsync(fullCommand, command, command.Watch, cancellationToken);
         
         if (exitCode != 0)
         {
@@ -116,6 +121,11 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
     
     private async Task<int> ExecuteScriptAsync(string script, CancellationToken cancellationToken)
     {
+        return await ExecuteScriptWithOptionsAsync(script, null, false, cancellationToken);
+    }
+    
+    private async Task<int> ExecuteScriptWithOptionsAsync(string script, RunCommand? command, bool useMonitoring, CancellationToken cancellationToken)
+    {
         try
         {
             // Check if Node.js is available
@@ -126,20 +136,59 @@ public sealed class RunCommandHandler : ICommandHandler<RunCommand>
                 return 1;
             }
             
-            // Execute the script using NodeJsHelper
-            var result = await _nodeJsHelper.ExecuteNpmScriptAsync(script, Directory.GetCurrentDirectory(), cancellationToken);
-            
-            if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+            // Use resilient helper if monitoring is requested
+            if (useMonitoring && _nodeJsHelper is IResilientNodeJsHelper resilientHelper)
             {
-                Console.WriteLine(result.StandardOutput);
+                var options = new ProcessMonitoringOptions
+                {
+                    EnableAutoRestart = command?.Watch ?? _resilienceConfig.EnableAutoRestart,
+                    MaxRestarts = command?.MaxRestarts ?? _resilienceConfig.MaxRestarts,
+                    RestartDelay = TimeSpan.FromSeconds(_resilienceConfig.RestartDelaySeconds),
+                    HealthCheckInterval = TimeSpan.FromSeconds(_resilienceConfig.HealthCheckIntervalSeconds),
+                    OnHealthEvent = (e) => 
+                    {
+                        if (e.Status == ProcessHealthStatus.Restarting)
+                        {
+                            Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] Process restarting (attempt {e.RestartCount})...");
+                        }
+                        else if (e.Status == ProcessHealthStatus.Crashed)
+                        {
+                            Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] Process crashed: {e.Message}");
+                        }
+                    }
+                };
+                
+                var result = await resilientHelper.ExecuteNpmScriptWithMonitoringAsync(script, Directory.GetCurrentDirectory(), options, cancellationToken);
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Console.WriteLine(result.StandardOutput);
+                }
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Console.Error.WriteLine(result.StandardError);
+                }
+                
+                return result.ExitCode;
             }
-            
-            if (!string.IsNullOrWhiteSpace(result.StandardError))
+            else
             {
-                Console.Error.WriteLine(result.StandardError);
+                // Execute the script using standard NodeJsHelper
+                var result = await _nodeJsHelper.ExecuteNpmScriptAsync(script, Directory.GetCurrentDirectory(), cancellationToken);
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardOutput))
+                {
+                    Console.WriteLine(result.StandardOutput);
+                }
+                
+                if (!string.IsNullOrWhiteSpace(result.StandardError))
+                {
+                    Console.Error.WriteLine(result.StandardError);
+                }
+                
+                return result.ExitCode;
             }
-            
-            return result.ExitCode;
         }
         catch (Exception ex)
         {

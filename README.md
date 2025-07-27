@@ -26,6 +26,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
 - **Package Execution**: `jio dlx` command for executing packages without installing (like npx/yarn dlx/pnpm dlx) - requires Node.js
+- **Fault-Tolerant Script Execution**: Automatic process monitoring and restart capability for scripts with `--watch` flag
 - **Robust Error Handling**: Graceful handling of corrupted packages and network failures
 
 ## Installation
@@ -176,8 +177,12 @@ jio run build              # Run build script with Node.js
 jio run test -- --watch    # Run test script with watch mode
 jio run -r build           # Run build in all workspaces
 jio run -r --parallel test # Run tests in parallel across workspaces
+jio run dev --watch        # Run dev script with auto-restart on failure
+jio run server --watch --max-restarts 5  # Run with custom restart limit
 
 **Note**: Script execution requires Node.js to be installed. Jio will automatically detect Node.js from your PATH, nvm, or common installation locations.
+
+**Process Monitoring**: Use `--watch` flag to enable automatic restart on process failure. This provides fault tolerance for long-running scripts like development servers.
 ```
 
 #### `jio test`

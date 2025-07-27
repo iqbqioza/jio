@@ -103,7 +103,9 @@ services.AddScoped<ICommandHandler<PatchCommand>, PatchCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 services.AddSingleton<IPatchManager, PatchManager>();
 services.AddSingleton<ISignatureVerifier, SignatureVerifier>();
-services.AddSingleton<INodeJsHelper, NodeJsHelper>();
+// Register both standard and resilient NodeJsHelper
+services.AddSingleton<INodeJsHelper, ResilientNodeJsHelper>();
+services.AddSingleton<IResilientNodeJsHelper>(sp => (IResilientNodeJsHelper)sp.GetRequiredService<INodeJsHelper>());
 
 // Script execution configuration
 var enableHighPerformance = Environment.GetEnvironmentVariable("JIO_HIGH_PERFORMANCE_SCRIPTS") == "true";
@@ -219,13 +221,17 @@ var recursiveOption = new Option<bool>("-r", "Run script in all workspaces recur
 var filterOption = new Option<string?>("--filter", "Filter workspaces by name");
 var parallelOption = new Option<bool>("--parallel", "Run scripts in parallel");
 var streamOption = new Option<bool>("--stream", "Stream output from scripts");
+var watchOption = new Option<bool>("--watch", "Enable process monitoring and auto-restart on failure");
+var maxRestartsOption = new Option<int?>("--max-restarts", "Maximum number of restart attempts (default: 3)");
 runCommand.AddArgument(scriptArgument);
 runCommand.AddOption(scriptArgsOption);
 runCommand.AddOption(recursiveOption);
 runCommand.AddOption(filterOption);
 runCommand.AddOption(parallelOption);
 runCommand.AddOption(streamOption);
-runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive, string? filter, bool parallel, bool stream) =>
+runCommand.AddOption(watchOption);
+runCommand.AddOption(maxRestartsOption);
+runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive, string? filter, bool parallel, bool stream, bool watch, int? maxRestarts) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<RunCommand>>();
     var exitCode = await handler.ExecuteAsync(new RunCommand 
@@ -235,10 +241,12 @@ runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive
         Recursive = recursive,
         Filter = filter,
         Parallel = parallel,
-        Stream = stream
+        Stream = stream,
+        Watch = watch,
+        MaxRestarts = maxRestarts
     });
     Environment.Exit(exitCode);
-}, scriptArgument, scriptArgsOption, recursiveOption, filterOption, parallelOption, streamOption);
+}, scriptArgument, scriptArgsOption, recursiveOption, filterOption, parallelOption, streamOption, watchOption, maxRestartsOption);
 
 // Test command (alias for run test)
 var testCommand = new Command("test", "Run test script");

@@ -567,6 +567,64 @@ configGetCommand.SetHandler((string key) =>
     Environment.Exit(value != null ? 0 : 1);
 }, configKeyArgument);
 configCommand.AddCommand(configGetCommand);
+
+// Config set command
+var configSetCommand = new Command("set", "Set a configuration value");
+var configSetKeyArgument = new Argument<string>("key", "Configuration key");
+var configSetValueArgument = new Argument<string>("value", "Configuration value");
+configSetCommand.AddArgument(configSetKeyArgument);
+configSetCommand.AddArgument(configSetValueArgument);
+configSetCommand.SetHandler(async (string key, string value) =>
+{
+    // Validate key
+    var validKeys = new[] { "registry", "proxy", "https-proxy", "no-proxy", "strict-ssl", "maxsockets", "user-agent", "ca" };
+    if (!validKeys.Contains(key) && !key.StartsWith("@") && !key.StartsWith("//"))
+    {
+        Console.Error.WriteLine($"Unknown configuration key: {key}");
+        Environment.Exit(1);
+    }
+    
+    // Get .npmrc path
+    var npmrcPath = Path.Combine(Environment.CurrentDirectory, ".npmrc");
+    
+    try
+    {
+        await NpmrcParser.WriteAsync(npmrcPath, key, value);
+        Console.WriteLine($"Set {key}={value}");
+        Environment.Exit(0);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Failed to set configuration: {ex.Message}");
+        Environment.Exit(1);
+    }
+}, configSetKeyArgument, configSetValueArgument);
+configCommand.AddCommand(configSetCommand);
+
+// Config delete command
+var configDeleteCommand = new Command("delete", "Delete a configuration key");
+configDeleteCommand.AddAlias("rm");
+var configDeleteKeyArgument = new Argument<string>("key", "Configuration key to delete");
+configDeleteCommand.AddArgument(configDeleteKeyArgument);
+configDeleteCommand.SetHandler(async (string key) =>
+{
+    // Get .npmrc path
+    var npmrcPath = Path.Combine(Environment.CurrentDirectory, ".npmrc");
+    
+    try
+    {
+        await NpmrcParser.DeleteAsync(npmrcPath, key);
+        Console.WriteLine($"Deleted {key}");
+        Environment.Exit(0);
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Failed to delete configuration: {ex.Message}");
+        Environment.Exit(1);
+    }
+}, configDeleteKeyArgument);
+configCommand.AddCommand(configDeleteCommand);
+
 rootCommand.AddCommand(configCommand);
 
 // Why command (pnpm compatibility)

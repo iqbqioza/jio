@@ -202,4 +202,66 @@ public static class NpmrcParser
         
         return merged;
     }
+    
+    public static async Task WriteAsync(string filePath, string key, string value, CancellationToken cancellationToken = default)
+    {
+        var lines = new List<string>();
+        var keyFound = false;
+        
+        // Read existing file if it exists
+        if (File.Exists(filePath))
+        {
+            lines = (await File.ReadAllLinesAsync(filePath, cancellationToken)).ToList();
+            
+            // Update existing key
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(lines[i]) || CommentRegex.IsMatch(lines[i]))
+                    continue;
+                
+                var match = KeyValueRegex.Match(lines[i]);
+                if (match.Success && match.Groups[1].Value.Trim() == key)
+                {
+                    lines[i] = $"{key}={value}";
+                    keyFound = true;
+                    break;
+                }
+            }
+        }
+        
+        // Add new key if not found
+        if (!keyFound)
+        {
+            lines.Add($"{key}={value}");
+        }
+        
+        // Write back to file
+        await File.WriteAllLinesAsync(filePath, lines, cancellationToken);
+    }
+    
+    public static async Task DeleteAsync(string filePath, string key, CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(filePath))
+            return;
+        
+        var lines = (await File.ReadAllLinesAsync(filePath, cancellationToken)).ToList();
+        var newLines = new List<string>();
+        
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line) || CommentRegex.IsMatch(line))
+            {
+                newLines.Add(line);
+                continue;
+            }
+            
+            var match = KeyValueRegex.Match(line);
+            if (!match.Success || match.Groups[1].Value.Trim() != key)
+            {
+                newLines.Add(line);
+            }
+        }
+        
+        await File.WriteAllLinesAsync(filePath, newLines, cancellationToken);
+    }
 }

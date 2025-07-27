@@ -332,6 +332,33 @@ jio config get registry  # Get current registry URL
 jio config get proxy     # Get proxy configuration
 ```
 
+#### `jio config set <key> <value>`
+Set configuration values in .npmrc
+
+Arguments:
+- `key`: Configuration key (registry, proxy, https-proxy, no-proxy, strict-ssl, maxsockets, user-agent, ca, or scoped registries like @mycompany:registry)
+- `value`: Configuration value
+
+Example:
+```bash
+jio config set registry https://custom.registry.com/
+jio config set proxy http://proxy.example.com:8080
+jio config set @mycompany:registry https://npm.mycompany.com/
+jio config set //npm.mycompany.com/:_authToken abc123
+```
+
+#### `jio config delete <key>`
+Delete configuration key from .npmrc (alias: `rm`)
+
+Arguments:
+- `key`: Configuration key to delete
+
+Example:
+```bash
+jio config delete proxy          # Remove proxy configuration
+jio config rm https-proxy        # Remove https-proxy configuration
+```
+
 #### `jio why <package>`
 Show why a package is installed (pnpm compatibility)
 

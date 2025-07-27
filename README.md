@@ -360,6 +360,95 @@ This command:
 - Faster than regular install for CI/CD environments
 - Ensures reproducible builds
 
+## Feature Comparison
+
+| Feature | npm | Yarn v1 | Yarn Berry | jio |
+|---------|-----|---------|------------|-----|
+| **Basic Commands** |
+| `install` | ✓ | ✓ | ✓ | ✓ |
+| `add` / `install <pkg>` | ✓ | ✓ | ✓ | ✓ |
+| `remove` / `uninstall` | ✓ | ✓ | ✓ | ✓ |
+| `update` | ✓ | ✓ | ✓ | ✓ |
+| `init` | ✓ | ✓ | ✓ | ✓ |
+| `run <script>` | ✓ | ✓ | ✓ | ✓ |
+| `test` | ✓ | ✓ | ✓ | ✓ |
+| `publish` | ✓ | ✓ | ✓ | ✓ |
+| `pack` | ✓ | ✓ | ✓ | ✗ |
+| `version` | ✓ | ✓ | ✓ | ✗ |
+| **Advanced Commands** |
+| `ci` (clean install) | ✓ | ✗ | ✗ | ✓ |
+| `audit` | ✓ | ✓ | ✓ | ✓ |
+| `npx` / `dlx` | ✓ (npx) | ✗ | ✓ (dlx) | ✓ (dlx) |
+| `why` | ✗ | ✓ | ✓ | ✓ |
+| `list` / `ls` | ✓ | ✓ | ✓ | ✓ |
+| `outdated` | ✓ | ✓ | ✓ | ✓ |
+| `link` | ✓ | ✓ | ✓ | ✓ |
+| **Lock Files** |
+| Lock file format | package-lock.json | yarn.lock | yarn.lock (v2) | jio-lock.json |
+| Import npm lock | - | ✗ | ✗ | ✓ |
+| Import yarn v1 lock | ✗ | - | ✓ | ✓ |
+| Import yarn berry lock | ✗ | ✗ | - | ✓ |
+| Import pnpm lock | ✗ | ✗ | ✗ | ✓ |
+| Export to npm format | - | ✗ | ✗ | ✓ |
+| Export to yarn format | ✗ | - | ✗ | ✓ |
+| Export to pnpm format | ✗ | ✗ | ✗ | ✓ |
+| **Storage** |
+| Flat node_modules | ✓ | ✓ | ✗ (PnP) | ✓ |
+| Hoisted dependencies | ✓ | ✓ | N/A | ✓ |
+| Content-addressable store | ✗ | ✗ | ✓ (PnP) | ✓ |
+| Hard links | ✗ | ✗ | ✗ | ✓ |
+| Zero-installs | ✗ | ✗ | ✓ | ✗ |
+| **Performance** |
+| Parallel downloads | ✓ | ✓ | ✓ | ✓ |
+| Offline cache | ✓ | ✓ | ✓ | ✓ |
+| Delta updates | ✗ | ✗ | ✓ | ✗ |
+| **Workspaces** |
+| Workspace support | ✓ | ✓ | ✓ | ✓ |
+| workspace: protocol | ✓ | ✓ | ✓ | ✓ |
+| Topological install | ✓ | ✓ | ✓ | ✓ |
+| Focused workspaces | ✗ | ✗ | ✓ | ✗ |
+| **Security** |
+| Integrity verification | ✓ | ✓ | ✓ | ✓ |
+| Security audit | ✓ | ✓ | ✓ | ✓ |
+| Auto fix vulnerabilities | ✓ | ✗ | ✗ | ✓ |
+| **Registry** |
+| npm registry | ✓ | ✓ | ✓ | ✓ |
+| Private registries | ✓ | ✓ | ✓ | ✓ |
+| Scoped registries | ✓ | ✓ | ✓ | ✓ |
+| .npmrc support | ✓ | ✓ | ✓ | ✓ |
+| **Scripts** |
+| Lifecycle scripts | ✓ | ✓ | ✓ | ✓ |
+| Pre/post scripts | ✓ | ✓ | ✓ | ✓ |
+| Custom scripts | ✓ | ✓ | ✓ | ✓ |
+| Script arguments | ✓ | ✓ | ✓ | ✓ |
+| **Dependencies** |
+| Git dependencies | ✓ | ✓ | ✓ | ✗ |
+| File dependencies | ✓ | ✓ | ✓ | ✗ |
+| Link protocol | ✓ | ✓ | ✓ | ✗ |
+| Peer dependencies | ✓ | ✓ | ✓ | ✓ |
+| Optional dependencies | ✓ | ✓ | ✓ | ✓ |
+| Overrides/resolutions | ✓ | ✓ (resolutions) | ✓ | ✗ |
+| **Production Features** |
+| HTTP retry mechanism | ✓ | ✓ | ✓ | ✓ |
+| Proxy support | ✓ | ✓ | ✓ | ✓ |
+| Structured logging | ✗ | ✗ | ✗ | ✓ |
+| Health checks | ✗ | ✗ | ✗ | ✓ |
+| Telemetry/Metrics | ✗ | ✗ | ✗ | ✓ |
+| **Platform** |
+| Node.js required | ✓ | ✓ | ✓ | ✗ |
+| Self-contained binary | ✗ | ✗ | ✗ | ✓ |
+| Cross-platform | ✓ | ✓ | ✓ | ✓ |
+
+### Key Differences
+
+- **jio** is written in C#/.NET and ships as a self-contained binary, no Node.js required
+- **jio** uses content-addressable storage with hard links similar to pnpm
+- **jio** can import and export lock files from all major package managers
+- **jio** includes production-ready features like structured logging and health checks
+- **Yarn Berry** uses Plug'n'Play (PnP) instead of node_modules
+- **npm** is the reference implementation with the most features
+- Some advanced features like git dependencies are not yet implemented in jio
+
 ## Architecture
 
 jio uses a content-addressable store similar to pnpm, storing packages once and creating hard links to `node_modules`. This approach significantly reduces disk usage when working with multiple projects.

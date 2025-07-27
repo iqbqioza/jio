@@ -1,0 +1,257 @@
+using FluentAssertions;
+using Jio.Core.Configuration;
+
+namespace Jio.Core.Tests.Configuration;
+
+public class NpmrcParserTests : IDisposable
+{
+    private readonly string _testDirectory;
+    private readonly string _npmrcPath;
+
+    public NpmrcParserTests()
+    {
+        _testDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(_testDirectory);
+        _npmrcPath = Path.Combine(_testDirectory, ".npmrc");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_Registry_Setting()
+    {
+        // Arrange
+        var content = "registry=https://custom.registry.com/";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.Registry.Should().Be("https://custom.registry.com/");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_Scoped_Registry()
+    {
+        // Arrange
+        var content = @"
+@mycompany:registry=https://npm.mycompany.com/
+@another:registry=https://npm.another.com/
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.ScopedRegistries.Should().HaveCount(2);
+        config.ScopedRegistries["@mycompany"].Should().Be("https://npm.mycompany.com/");
+        config.ScopedRegistries["@another"].Should().Be("https://npm.another.com/");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_Auth_Tokens()
+    {
+        // Arrange
+        var content = @"
+//registry.npmjs.org/:_authToken=npm_token123
+//npm.mycompany.com/:_authToken=company_token456
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.AuthTokens.Should().HaveCount(2);
+        config.AuthTokens["registry.npmjs.org"].Should().Be("npm_token123");
+        config.AuthTokens["npm.mycompany.com"].Should().Be("company_token456");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_Proxy_Settings()
+    {
+        // Arrange
+        var content = @"
+proxy=http://proxy.company.com:8080
+https-proxy=https://secure-proxy.company.com:8443
+no-proxy=localhost,127.0.0.1,.company.com
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.Proxy.Should().Be("http://proxy.company.com:8080");
+        config.HttpsProxy.Should().Be("https://secure-proxy.company.com:8443");
+        config.NoProxy.Should().Be("localhost,127.0.0.1,.company.com");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_SSL_Settings()
+    {
+        // Arrange
+        var content = @"
+strict-ssl=false
+ca=/path/to/ca.pem
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.StrictSsl.Should().BeFalse();
+        config.CaFile.Should().Be("/path/to/ca.pem");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Ignore_Comments()
+    {
+        // Arrange
+        var content = @"
+# This is a comment
+registry=https://custom.registry.com/
+; This is also a comment
+@mycompany:registry=https://npm.mycompany.com/
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.Registry.Should().Be("https://custom.registry.com/");
+        config.ScopedRegistries.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Handle_Quoted_Values()
+    {
+        // Arrange
+        var content = @"
+user-agent=""jio client v1.0""
+proxy='http://proxy with spaces.com:8080'
+";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.UserAgent.Should().Be("jio client v1.0");
+        config.Proxy.Should().Be("http://proxy with spaces.com:8080");
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Handle_Empty_File()
+    {
+        // Arrange
+        await File.WriteAllTextAsync(_npmrcPath, "");
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.Registry.Should().BeNull();
+        config.ScopedRegistries.Should().BeEmpty();
+        config.AuthTokens.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Handle_NonExistent_File()
+    {
+        // Act
+        var config = await NpmrcParser.ParseAsync(Path.Combine(_testDirectory, "nonexistent.npmrc"));
+
+        // Assert
+        config.Should().NotBeNull();
+        config.Registry.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ParseAsync_Should_Parse_MaxSockets()
+    {
+        // Arrange
+        var content = "maxsockets=5";
+        await File.WriteAllTextAsync(_npmrcPath, content);
+
+        // Act
+        var config = await NpmrcParser.ParseAsync(_npmrcPath);
+
+        // Assert
+        config.MaxSockets.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task LoadConfigurationAsync_Should_Merge_Configs()
+    {
+        // Arrange
+        // Create project-level .npmrc
+        Directory.SetCurrentDirectory(_testDirectory);
+        var projectNpmrc = Path.Combine(_testDirectory, ".npmrc");
+        await File.WriteAllTextAsync(projectNpmrc, @"
+registry=https://project.registry.com/
+@mycompany:registry=https://project.mycompany.com/
+");
+
+        // Create user-level .npmrc
+        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userNpmrc = Path.Combine(userHome, ".npmrc");
+        var userNpmrcBackup = userNpmrc + ".backup";
+        
+        try
+        {
+            // Backup existing user .npmrc if it exists
+            if (File.Exists(userNpmrc))
+            {
+                File.Move(userNpmrc, userNpmrcBackup);
+            }
+
+            await File.WriteAllTextAsync(userNpmrc, @"
+registry=https://user.registry.com/
+@another:registry=https://user.another.com/
+proxy=http://user.proxy.com:8080
+");
+
+            // Act
+            var config = await NpmrcParser.LoadConfigurationAsync();
+
+            // Assert
+            // Project-level should override user-level
+            config.Registry.Should().Be("https://project.registry.com/");
+            config.ScopedRegistries["@mycompany"].Should().Be("https://project.mycompany.com/");
+            // User-level settings that aren't overridden
+            config.ScopedRegistries["@another"].Should().Be("https://user.another.com/");
+            config.Proxy.Should().Be("http://user.proxy.com:8080");
+        }
+        finally
+        {
+            // Restore user .npmrc
+            if (File.Exists(userNpmrc))
+            {
+                File.Delete(userNpmrc);
+            }
+            if (File.Exists(userNpmrcBackup))
+            {
+                File.Move(userNpmrcBackup, userNpmrc);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.SetCurrentDirectory(Path.GetTempPath());
+            if (Directory.Exists(_testDirectory))
+            {
+                Directory.Delete(_testDirectory, true);
+            }
+        }
+        catch
+        {
+            // Ignore cleanup errors
+        }
+    }
+}

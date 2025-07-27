@@ -24,8 +24,13 @@ public sealed class NpmRegistry : IPackageRegistry
     
     public async Task<PackageManifest> GetPackageManifestAsync(string name, string version, CancellationToken cancellationToken = default)
     {
-        var url = $"{_configuration.Registry}{name}/{version}";
-        var response = await _httpClient.GetAsync(url, cancellationToken);
+        var registry = GetRegistryForPackage(name);
+        var url = $"{registry}{name}/{version}";
+        
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        ConfigureRequest(request, registry);
+        
+        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -37,8 +42,13 @@ public sealed class NpmRegistry : IPackageRegistry
     
     public async Task<IReadOnlyList<string>> GetPackageVersionsAsync(string name, CancellationToken cancellationToken = default)
     {
-        var url = $"{_configuration.Registry}{name}";
-        var response = await _httpClient.GetAsync(url, cancellationToken);
+        var registry = GetRegistryForPackage(name);
+        var url = $"{registry}{name}";
+        
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        ConfigureRequest(request, registry);
+        
+        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -53,8 +63,13 @@ public sealed class NpmRegistry : IPackageRegistry
     
     public async Task<Stream> DownloadPackageAsync(string name, string version, CancellationToken cancellationToken = default)
     {
-        var manifestUrl = $"{_configuration.Registry}{name}/{version}";
-        var response = await _httpClient.GetAsync(manifestUrl, cancellationToken);
+        var registry = GetRegistryForPackage(name);
+        var manifestUrl = $"{registry}{name}/{version}";
+        
+        using var manifestRequest = new HttpRequestMessage(HttpMethod.Get, manifestUrl);
+        ConfigureRequest(manifestRequest, registry);
+        
+        var response = await _httpClient.SendAsync(manifestRequest, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -64,7 +79,10 @@ public sealed class NpmRegistry : IPackageRegistry
         if (string.IsNullOrEmpty(tarballUrl))
             throw new InvalidOperationException($"No tarball URL found for {name}@{version}");
         
-        var tarballResponse = await _httpClient.GetAsync(tarballUrl, cancellationToken);
+        using var tarballRequest = new HttpRequestMessage(HttpMethod.Get, tarballUrl);
+        ConfigureRequest(tarballRequest, new Uri(tarballUrl).Host);
+        
+        var tarballResponse = await _httpClient.SendAsync(tarballRequest, cancellationToken);
         tarballResponse.EnsureSuccessStatusCode();
         
         return await tarballResponse.Content.ReadAsStreamAsync(cancellationToken);
@@ -72,8 +90,13 @@ public sealed class NpmRegistry : IPackageRegistry
     
     public async Task<string> GetPackageIntegrityAsync(string name, string version, CancellationToken cancellationToken = default)
     {
-        var url = $"{_configuration.Registry}{name}/{version}";
-        var response = await _httpClient.GetAsync(url, cancellationToken);
+        var registry = GetRegistryForPackage(name);
+        var url = $"{registry}{name}/{version}";
+        
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        ConfigureRequest(request, registry);
+        
+        var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
         
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -81,5 +104,48 @@ public sealed class NpmRegistry : IPackageRegistry
         var integrity = doc?["dist"]?["integrity"]?.GetValue<string>();
         
         return integrity ?? throw new InvalidOperationException($"No integrity hash found for {name}@{version}");
+    }
+    
+    private string GetRegistryForPackage(string packageName)
+    {
+        // Check for scoped package registry
+        if (packageName.StartsWith('@'))
+        {
+            var scopeEnd = packageName.IndexOf('/');
+            if (scopeEnd > 0)
+            {
+                var scope = packageName[..scopeEnd];
+                if (_configuration.ScopedRegistries.TryGetValue(scope, out var scopedRegistry))
+                {
+                    return EnsureTrailingSlash(scopedRegistry);
+                }
+            }
+        }
+        
+        return EnsureTrailingSlash(_configuration.Registry);
+    }
+    
+    private void ConfigureRequest(HttpRequestMessage request, string registryOrHost)
+    {
+        // Add user agent
+        if (!string.IsNullOrEmpty(_configuration.UserAgent))
+        {
+            request.Headers.UserAgent.ParseAdd(_configuration.UserAgent);
+        }
+        
+        // Add auth token if available
+        var host = registryOrHost.Contains("://") 
+            ? new Uri(registryOrHost).Host 
+            : registryOrHost;
+            
+        if (_configuration.AuthTokens.TryGetValue(host, out var token))
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        }
+    }
+    
+    private static string EnsureTrailingSlash(string url)
+    {
+        return url.EndsWith('/') ? url : url + "/";
     }
 }

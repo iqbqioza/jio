@@ -5,12 +5,21 @@ using Jio.Core.Configuration;
 using Jio.Core.Registry;
 using Jio.Core.Resolution;
 using Jio.Core.Storage;
+using Jio.Core.Http;
 
 var services = new ServiceCollection();
 
 // Register services
-services.AddSingleton<JioConfiguration>();
-services.AddHttpClient<IPackageRegistry, NpmRegistry>();
+services.AddSingleton<JioConfiguration>(sp =>
+{
+    return JioConfiguration.CreateWithNpmrcAsync().GetAwaiter().GetResult();
+});
+services.AddSingleton<HttpClient>(sp =>
+{
+    var config = sp.GetRequiredService<JioConfiguration>();
+    return ProxyAwareHttpClientFactory.CreateHttpClient(config);
+});
+services.AddSingleton<IPackageRegistry, NpmRegistry>();
 services.AddSingleton<IPackageStore, ContentAddressableStore>();
 services.AddScoped<IDependencyResolver, DependencyResolver>();
 services.AddScoped<ICommandHandler<InstallCommand>, InstallCommandHandler>();

@@ -11,7 +11,7 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 
 ## Installation
 
-Download the latest release for your platform from the [releases page](https://github.com/yourusername/jio/releases).
+Download the latest release for your platform from the [releases page](https://github.com/iqbqioza/jio/releases).
 
 ```bash
 # Linux/macOS
@@ -40,12 +40,46 @@ jio install
 
 # Install a specific package
 jio install express
+# or yarn-style
+jio add express
 
 # Install as dev dependency
 jio install --save-dev typescript
 
 # Install exact version
 jio install express@4.18.2 --save-exact
+```
+
+### Run scripts
+
+```bash
+# Run a script from package.json
+jio run build
+jio run dev
+
+# Run test script
+jio test
+
+# Run start script  
+jio start
+
+# Pass arguments to scripts
+jio run test -- --coverage
+```
+
+### Manage packages
+
+```bash
+# Remove a package
+jio uninstall lodash
+# or
+jio remove lodash
+
+# Update packages
+jio update              # Update all packages
+jio update express      # Update specific package
+jio update --latest     # Update to latest versions
+jio update --dev        # Update only devDependencies
 ```
 
 ### Command Reference
@@ -58,7 +92,7 @@ Options:
 - `-y`: Skip prompts and use defaults
 
 #### `jio install [package]`
-Install packages (alias: `jio i`)
+Install packages (aliases: `i`, `add`)
 
 Arguments:
 - `package`: Optional package name with optional version (e.g., `express@4.18.2`)
@@ -68,6 +102,47 @@ Options:
 - `--save-optional`: Save as optional dependency
 - `--save-exact`: Save exact version instead of using caret (^) range
 - `-g`: Install globally (not yet implemented)
+
+#### `jio uninstall <package>`
+Remove packages (aliases: `remove`, `rm`, `r`)
+
+Arguments:
+- `package`: Package name to uninstall
+
+Options:
+- `--save-dev`: Remove from devDependencies
+- `--save-optional`: Remove from optionalDependencies
+- `-g`: Uninstall globally (not yet implemented)
+
+#### `jio update [package]`
+Update packages to newer versions (aliases: `upgrade`, `up`)
+
+Arguments:
+- `package`: Optional package name to update (updates all if not specified)
+
+Options:
+- `--latest`: Update to latest version, ignoring version ranges
+- `--dev`: Update devDependencies only
+- `--all`: Update all dependencies (both dependencies and devDependencies)
+
+#### `jio run [script]`
+Run scripts defined in package.json
+
+Arguments:
+- `script`: Script name to run (lists available scripts if not specified)
+- `--`: Arguments to pass to the script
+
+Example:
+```bash
+jio run build
+jio run test -- --watch
+```
+
+#### `jio test`
+Run the test script (shortcut for `jio run test`)
+
+#### `jio start`
+Run the start script (shortcut for `jio run start`)
 
 ## Architecture
 
@@ -104,7 +179,7 @@ Requirements:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/jio.git
+git clone https://github.com/iqbqioza/jio.git
 cd jio
 
 # Build
@@ -153,4 +228,4 @@ dotnet test --filter "FullyQualifiedName~IntegrityVerifier"
 
 ## License
 
-ISC
+MIT License - see [LICENSE](LICENSE) file for details.

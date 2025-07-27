@@ -70,13 +70,10 @@ public class InitCommandHandlerTests : IDisposable
         
         var packageJsonPath = Path.Combine(_testDirectory, "package.json");
         var json = await File.ReadAllTextAsync(packageJsonPath);
-        var manifest = JsonSerializer.Deserialize<PackageManifest>(json, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
         
-        manifest!.Name.Should().Be(Path.GetFileName(_testDirectory));
+        root.GetProperty("name").GetString().Should().Be(Path.GetFileName(_testDirectory));
     }
 
     [Fact]
@@ -92,10 +89,13 @@ public class InitCommandHandlerTests : IDisposable
         };
 
         // Act
+        var output = new StringWriter();
+        Console.SetOut(output);
         var result = await _handler.ExecuteAsync(command);
 
         // Assert
         result.Should().Be(1);
+        output.ToString().Should().Contain("package.json already exists");
     }
 
     [Fact]

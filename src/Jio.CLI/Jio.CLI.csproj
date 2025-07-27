@@ -10,6 +10,11 @@
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifiers>linux-x64;linux-arm64;osx-x64;osx-arm64;win-x64</RuntimeIdentifiers>
+    <!-- Suppress all trimming warnings -->
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <TrimmerRemoveSymbols>true</TrimmerRemoveSymbols>
+    <TrimMode>partial</TrimMode>
+    <NoWarn>$(NoWarn);IL2026;IL2067;IL2070;IL2104;NETSDK1144</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

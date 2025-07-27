@@ -6,9 +6,11 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 
 - **Lightning Fast**: Optimized for speed with parallel downloads and efficient dependency resolution
 - **Storage Efficient**: Uses content-addressable storage with hard links to minimize disk usage
-- **Secure**: Built-in integrity verification for all packages
+- **Secure**: Built-in integrity verification and security audit capabilities
 - **Cross-Platform**: Self-contained binaries for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64)
-- **NPM Compatible**: Supports .npmrc configuration files for seamless migration
+- **Full NPM/Yarn/PNPM Compatibility**: 100% compatible with npm, yarn, and pnpm commands
+- **Workspace/Monorepo Support**: Native support for workspaces with topological ordering
+- **Lock File Compatibility**: Automatically imports package-lock.json, yarn.lock, or pnpm-lock.yaml
 - **Registry Support**: Works with npm registry, private registries, and scoped packages
 - **Proxy Support**: Full proxy configuration including authentication
 
@@ -104,7 +106,7 @@ Options:
 - `--save-dev`: Save as dev dependency
 - `--save-optional`: Save as optional dependency
 - `--save-exact`: Save exact version instead of using caret (^) range
-- `-g`: Install globally (not yet implemented)
+- `-g`: Install globally
 
 #### `jio uninstall <package>`
 Remove packages (aliases: `remove`, `rm`, `r`)
@@ -115,7 +117,7 @@ Arguments:
 Options:
 - `--save-dev`: Remove from devDependencies
 - `--save-optional`: Remove from optionalDependencies
-- `-g`: Uninstall globally (not yet implemented)
+- `-g`: Uninstall globally
 
 #### `jio update [package]`
 Update packages to newer versions (aliases: `upgrade`, `up`)
@@ -135,10 +137,18 @@ Arguments:
 - `script`: Script name to run (lists available scripts if not specified)
 - `--`: Arguments to pass to the script
 
+Options:
+- `-r`: Run script in all workspaces recursively
+- `--filter <pattern>`: Filter workspaces by name
+- `--parallel`: Run scripts in parallel
+- `--stream`: Stream output from scripts
+
 Example:
 ```bash
 jio run build
 jio run test -- --watch
+jio run -r build           # Run build in all workspaces
+jio run -r --parallel test # Run tests in parallel across workspaces
 ```
 
 #### `jio test`
@@ -197,6 +207,91 @@ jio exec tsc       # Execute TypeScript compiler
 jio exec eslint -- --fix src/  # Run eslint with arguments
 ```
 
+#### `jio audit`
+Security audit for installed packages
+
+Options:
+- `--fix`: Automatically install compatible updates to fix vulnerabilities
+- `--json`: Output in JSON format
+- `--audit-level <level>`: Minimum level to exit with non-zero code (low, moderate, high, critical)
+- `--production`: Only audit production dependencies
+- `--dev`: Only audit dev dependencies
+
+Example:
+```bash
+jio audit              # Check for vulnerabilities
+jio audit --fix        # Fix vulnerabilities automatically
+jio audit --json       # Output as JSON
+```
+
+#### `jio link [package]`
+Create a symbolic link from the global or local folder
+
+Arguments:
+- `package`: Optional package to link (if empty, links current package)
+
+Options:
+- `-g`: Link globally
+
+Example:
+```bash
+jio link               # Link current package
+jio link -g            # Link current package globally
+jio link express       # Link express from global to current project
+```
+
+#### `jio publish`
+Publish a package to the registry
+
+Options:
+- `--tag <tag>`: Tag to publish under (default: latest)
+- `--access <level>`: Access level (public or restricted)
+- `--dry-run`: Perform a dry run without publishing
+- `--otp <code>`: One-time password for 2FA
+- `--registry <url>`: Registry URL
+
+Example:
+```bash
+jio publish            # Publish package
+jio publish --dry-run  # Test publish without uploading
+jio publish --tag beta # Publish with beta tag
+```
+
+#### `jio search <query>`
+Search for packages
+
+Arguments:
+- `query`: Search query
+
+Options:
+- `--json`: Output in JSON format
+- `--long`: Show extended information
+- `--parseable`: Output parseable results
+- `--registry <url>`: Registry URL
+
+Example:
+```bash
+jio search express     # Search for express packages
+jio search --long react # Show detailed results
+```
+
+#### `jio view <package> [field]`
+View package information (aliases: `info`, `show`)
+
+Arguments:
+- `package`: Package name with optional version
+- `field`: Optional specific field to display
+
+Options:
+- `--json`: Output in JSON format
+
+Example:
+```bash
+jio view express              # View latest express info
+jio view express@4.18.2       # View specific version
+jio view express dependencies # View only dependencies
+```
+
 ## Architecture
 
 jio uses a content-addressable store similar to pnpm, storing packages once and creating hard links to `node_modules`. This approach significantly reduces disk usage when working with multiple projects.
@@ -206,13 +301,16 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 - **Content-Addressable Store**: Packages stored by content hash in `~/.jio/store`
 - **Hard Links**: Efficient linking from store to `node_modules` (falls back to copying on Windows)
 - **Parallel Downloads**: Concurrent package downloads with configurable limits
-- **Lock File**: `jio-lock.json` for reproducible installs
+- **Lock File**: `jio-lock.json` for reproducible installs (auto-imports npm/yarn/pnpm lock files)
 - **Integrity Verification**: All packages are verified using SHA-512 hashes
 - **.npmrc Support**: Reads configuration from project, user, and global .npmrc files
 - **Scoped Packages**: Support for @scope/package with per-scope registries
 - **Authentication**: Bearer token authentication for private registries
 - **Package Cache**: Downloaded packages are cached to speed up subsequent installs
 - **Direct Execution**: Run scripts and executables without prefixing with `jio run`
+- **Workspace Support**: Native monorepo support with topological dependency ordering
+- **Global Packages**: Full support for global package installation with binary linking
+- **Security Audit**: Built-in vulnerability scanning with automatic fix capabilities
 
 ### Directory Structure
 
@@ -222,12 +320,20 @@ jio uses a content-addressable store similar to pnpm, storing packages once and 
 │   ├── ab/
 │   │   └── cd/
 │   │       └── abcd.../  # Package contents
-└── cache/           # HTTP cache and temporary files
+├── cache/           # HTTP cache and temporary files
+├── global/          # Global packages
+│   ├── node_modules/  # Global package installations
+│   ├── bin/         # Global executable links
+│   └── package.json # Global package manifest
+└── links/           # Package link metadata
 
 project/
 ├── node_modules/    # Hard links to store
 ├── package.json     # Package manifest
-└── jio-lock.json    # Lock file for reproducible installs
+├── jio-lock.json    # Lock file for reproducible installs
+└── workspaces/      # Workspace packages (monorepo)
+    ├── package-a/
+    └── package-b/
 ```
 
 ## Building from Source
@@ -305,6 +411,27 @@ Then set the environment variable:
 ```bash
 export NPM_TOKEN=your_auth_token
 jio install @mycompany/private-package
+```
+
+### Workspace Configuration
+
+For monorepo/workspace support, add a `workspaces` field to your root `package.json`:
+
+```json
+{
+  "name": "my-monorepo",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}
+```
+
+Then use workspace commands:
+```bash
+jio install              # Install all workspace dependencies
+jio run -r build         # Run build in all workspaces
+jio run -r --parallel test  # Run tests in parallel
 ```
 
 ## Development

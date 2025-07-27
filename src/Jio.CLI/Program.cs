@@ -32,6 +32,11 @@ services.AddScoped<ICommandHandler<UpdateCommand>, UpdateCommandHandler>();
 services.AddScoped<ICommandHandler<ListCommand>, ListCommandHandler>();
 services.AddScoped<ICommandHandler<OutdatedCommand>, OutdatedCommandHandler>();
 services.AddScoped<ICommandHandler<ExecCommand>, ExecCommandHandler>();
+services.AddScoped<ICommandHandler<AuditCommand>, AuditCommandHandler>();
+services.AddScoped<ICommandHandler<LinkCommand>, LinkCommandHandler>();
+services.AddScoped<ICommandHandler<PublishCommand>, PublishCommandHandler>();
+services.AddScoped<ICommandHandler<SearchCommand>, SearchCommandHandler>();
+services.AddScoped<ICommandHandler<ViewCommand>, ViewCommandHandler>();
 services.AddScoped<InstallCommandHandler>();
 
 var serviceProvider = services.BuildServiceProvider();
@@ -83,18 +88,30 @@ installCommand.SetHandler(async (string? package, bool saveDev, bool saveOptiona
 var runCommand = new Command("run", "Run scripts defined in package.json");
 var scriptArgument = new Argument<string?>("script", () => null, "Script to run");
 var scriptArgsOption = new Option<string[]>("--", "Arguments to pass to the script") { AllowMultipleArgumentsPerToken = true };
+var recursiveOption = new Option<bool>("-r", "Run script in all workspaces recursively");
+var filterOption = new Option<string?>("--filter", "Filter workspaces by name");
+var parallelOption = new Option<bool>("--parallel", "Run scripts in parallel");
+var streamOption = new Option<bool>("--stream", "Stream output from scripts");
 runCommand.AddArgument(scriptArgument);
 runCommand.AddOption(scriptArgsOption);
-runCommand.SetHandler(async (string? script, string[] scriptArgs) =>
+runCommand.AddOption(recursiveOption);
+runCommand.AddOption(filterOption);
+runCommand.AddOption(parallelOption);
+runCommand.AddOption(streamOption);
+runCommand.SetHandler(async (string? script, string[] scriptArgs, bool recursive, string? filter, bool parallel, bool stream) =>
 {
     var handler = serviceProvider.GetRequiredService<ICommandHandler<RunCommand>>();
     var exitCode = await handler.ExecuteAsync(new RunCommand 
     { 
         Script = script,
-        Args = scriptArgs?.ToList() ?? []
+        Args = scriptArgs?.ToList() ?? [],
+        Recursive = recursive,
+        Filter = filter,
+        Parallel = parallel,
+        Stream = stream
     });
     Environment.Exit(exitCode);
-}, scriptArgument, scriptArgsOption);
+}, scriptArgument, scriptArgsOption, recursiveOption, filterOption, parallelOption, streamOption);
 
 // Test command (alias for run test)
 var testCommand = new Command("test", "Run test script");
@@ -257,13 +274,142 @@ execCommand.SetHandler(async (string command, string[] args, bool package, strin
 }, execCommandArgument, execArgsOption, execPackageOption, execCallOption);
 rootCommand.AddCommand(execCommand);
 
+// Audit command
+var auditCommand = new Command("audit", "Scan project for vulnerabilities");
+var auditFixOption = new Option<bool>("--fix", "Automatically install compatible updates");
+var auditJsonOption = new Option<bool>("--json", "Output in JSON format");
+var auditLevelOption = new Option<string>("--audit-level", () => "low", "Minimum level to exit with non-zero code");
+var auditProductionOption = new Option<bool>("--production", "Only audit production dependencies");
+var auditDevOption = new Option<bool>("--dev", "Only audit dev dependencies");
+auditCommand.AddOption(auditFixOption);
+auditCommand.AddOption(auditJsonOption);
+auditCommand.AddOption(auditLevelOption);
+auditCommand.AddOption(auditProductionOption);
+auditCommand.AddOption(auditDevOption);
+auditCommand.SetHandler(async (bool fix, bool json, string level, bool production, bool dev) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<AuditCommand>>();
+    var auditLevel = level.ToLowerInvariant() switch
+    {
+        "critical" => AuditLevel.Critical,
+        "high" => AuditLevel.High,
+        "moderate" => AuditLevel.Moderate,
+        _ => AuditLevel.Low
+    };
+    var exitCode = await handler.ExecuteAsync(new AuditCommand 
+    { 
+        Fix = fix,
+        Json = json,
+        Level = auditLevel,
+        Production = production,
+        Dev = dev
+    });
+    Environment.Exit(exitCode);
+}, auditFixOption, auditJsonOption, auditLevelOption, auditProductionOption, auditDevOption);
+rootCommand.AddCommand(auditCommand);
+
+// Link command
+var linkCommand = new Command("link", "Create a symbolic link from the global or local folder");
+var linkPackageArgument = new Argument<string?>("package", () => null, "Package to link (if empty, links current package)");
+var linkGlobalOption = new Option<bool>("-g", "Link globally");
+linkCommand.AddArgument(linkPackageArgument);
+linkCommand.AddOption(linkGlobalOption);
+linkCommand.SetHandler(async (string? package, bool global) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<LinkCommand>>();
+    var exitCode = await handler.ExecuteAsync(new LinkCommand 
+    { 
+        Package = package,
+        Global = global
+    });
+    Environment.Exit(exitCode);
+}, linkPackageArgument, linkGlobalOption);
+rootCommand.AddCommand(linkCommand);
+
+// Publish command
+var publishCommand = new Command("publish", "Publish a package to the registry");
+var publishTagOption = new Option<string>("--tag", () => "latest", "Tag to publish under");
+var publishAccessOption = new Option<string>("--access", "Access level (public or restricted)");
+var publishDryRunOption = new Option<bool>("--dry-run", "Perform a dry run without publishing");
+var publishOtpOption = new Option<string>("--otp", "One-time password for 2FA");
+var publishRegistryOption = new Option<string>("--registry", "Registry URL");
+publishCommand.AddOption(publishTagOption);
+publishCommand.AddOption(publishAccessOption);
+publishCommand.AddOption(publishDryRunOption);
+publishCommand.AddOption(publishOtpOption);
+publishCommand.AddOption(publishRegistryOption);
+publishCommand.SetHandler(async (string tag, string? access, bool dryRun, string? otp, string? registry) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<PublishCommand>>();
+    var exitCode = await handler.ExecuteAsync(new PublishCommand 
+    { 
+        Tag = tag,
+        Access = access,
+        DryRun = dryRun,
+        Otp = otp,
+        Registry = registry
+    });
+    Environment.Exit(exitCode);
+}, publishTagOption, publishAccessOption, publishDryRunOption, publishOtpOption, publishRegistryOption);
+rootCommand.AddCommand(publishCommand);
+
+// Search command
+var searchCommand = new Command("search", "Search for packages");
+var searchQueryArgument = new Argument<string>("query", "Search query");
+var searchJsonOption = new Option<bool>("--json", "Output in JSON format");
+var searchLongOption = new Option<bool>("--long", "Show extended information");
+var searchParseableOption = new Option<bool>("--parseable", "Output parseable results");
+var searchRegistryOption = new Option<string>("--registry", "Registry URL");
+searchCommand.AddArgument(searchQueryArgument);
+searchCommand.AddOption(searchJsonOption);
+searchCommand.AddOption(searchLongOption);
+searchCommand.AddOption(searchParseableOption);
+searchCommand.AddOption(searchRegistryOption);
+searchCommand.SetHandler(async (string query, bool json, bool longFormat, bool parseable, string? registry) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<SearchCommand>>();
+    var exitCode = await handler.ExecuteAsync(new SearchCommand 
+    { 
+        Query = query,
+        Json = json,
+        Long = longFormat,
+        ParseableOutput = parseable,
+        Registry = registry
+    });
+    Environment.Exit(exitCode);
+}, searchQueryArgument, searchJsonOption, searchLongOption, searchParseableOption, searchRegistryOption);
+rootCommand.AddCommand(searchCommand);
+
+// View command
+var viewCommand = new Command("view", "View package information");
+viewCommand.AddAlias("info");
+viewCommand.AddAlias("show");
+var viewPackageArgument = new Argument<string>("package", "Package name with optional version");
+var viewFieldArgument = new Argument<string?>("field", () => null, "Specific field to display");
+var viewJsonOption = new Option<bool>("--json", "Output in JSON format");
+viewCommand.AddArgument(viewPackageArgument);
+viewCommand.AddArgument(viewFieldArgument);
+viewCommand.AddOption(viewJsonOption);
+viewCommand.SetHandler(async (string package, string? field, bool json) =>
+{
+    var handler = serviceProvider.GetRequiredService<ICommandHandler<ViewCommand>>();
+    var exitCode = await handler.ExecuteAsync(new ViewCommand 
+    { 
+        Package = package,
+        Field = field,
+        Json = json
+    });
+    Environment.Exit(exitCode);
+}, viewPackageArgument, viewFieldArgument, viewJsonOption);
+rootCommand.AddCommand(viewCommand);
+
 // Support for direct command execution (npm/yarn/pnpm style)
 // Check if first argument is not a known command
 if (args.Length > 0)
 {
     var knownCommands = new[] { "init", "install", "i", "add", "uninstall", "remove", "rm", "r", 
                                 "update", "upgrade", "up", "run", "test", "start", "list", "ls", 
-                                "outdated", "exec", "--help", "-h", "--version" };
+                                "outdated", "exec", "audit", "link", "publish", "search", "view", "info", "show", "--help", "-h", "--version" };
     
     if (!knownCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
     {

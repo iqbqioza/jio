@@ -45,4 +45,39 @@ public sealed class PackageManifest
     
     [JsonPropertyName("files")]
     public List<string>? Files { get; init; }
+    
+    [JsonPropertyName("workspaces")]
+    public object? Workspaces { get; init; }
+    
+    [JsonPropertyName("private")]
+    public bool? Private { get; init; }
+    
+    [JsonPropertyName("bin")]
+    public object? Bin { get; init; }
+    
+    [JsonPropertyName("optionalDependencies")]
+    public Dictionary<string, string>? OptionalDependencies { get; init; }
+    
+    [JsonPropertyName("peerDependencies")]
+    public Dictionary<string, string>? PeerDependencies { get; init; }
+    
+    public async Task SaveAsync(string path)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(this, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        });
+        await File.WriteAllTextAsync(path, json);
+    }
+    
+    public static async Task<PackageManifest> LoadAsync(string path)
+    {
+        var json = await File.ReadAllTextAsync(path);
+        return System.Text.Json.JsonSerializer.Deserialize<PackageManifest>(json, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        }) ?? throw new InvalidOperationException("Failed to parse package.json");
+    }
 }

@@ -182,4 +182,22 @@ public sealed class NpmRegistry : IPackageRegistry
     {
         return url.EndsWith('/') ? url : url + "/";
     }
+    
+    public async Task<PackageMetadata> GetPackageMetadataAsync(string name, CancellationToken cancellationToken = default)
+    {
+        var registry = GetRegistryForPackage(name);
+        var url = $"{registry}{name}";
+        
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        ConfigureRequest(request, registry);
+        
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+        var metadata = JsonSerializer.Deserialize<PackageMetadata>(json, _jsonOptions)
+            ?? throw new InvalidOperationException($"Failed to deserialize package metadata for {name}");
+        
+        return metadata;
+    }
 }

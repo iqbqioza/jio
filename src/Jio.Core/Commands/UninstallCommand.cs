@@ -26,6 +26,11 @@ public sealed class UninstallCommandHandler : ICommandHandler<UninstallCommand>
     
     public async Task<int> ExecuteAsync(UninstallCommand command, CancellationToken cancellationToken = default)
     {
+        if (command.Global)
+        {
+            return await ExecuteGlobalUninstallAsync(command, cancellationToken);
+        }
+        
         var manifestPath = Path.Combine(Directory.GetCurrentDirectory(), "package.json");
         
         if (!File.Exists(manifestPath))
@@ -123,6 +128,122 @@ public sealed class UninstallCommandHandler : ICommandHandler<UninstallCommand>
         catch (Exception ex)
         {
             Console.WriteLine($"Warning: Failed to update lock file: {ex.Message}");
+        }
+    }
+    
+    private async Task<int> ExecuteGlobalUninstallAsync(UninstallCommand command, CancellationToken cancellationToken)
+    {
+        var globalPath = GetGlobalPath();
+        var globalNodeModules = Path.Combine(globalPath, "node_modules");
+        var globalBin = Path.Combine(globalPath, "bin");
+        var packagePath = Path.Combine(globalNodeModules, command.Package);
+        
+        if (!Directory.Exists(packagePath))
+        {
+            Console.WriteLine($"Package {command.Package} is not installed globally");
+            return 1;
+        }
+        
+        // Remove bin links
+        var packageJsonPath = Path.Combine(packagePath, "package.json");
+        if (File.Exists(packageJsonPath))
+        {
+            var packageJson = await File.ReadAllTextAsync(packageJsonPath, cancellationToken);
+            var manifest = JsonSerializer.Deserialize<PackageManifest>(packageJson, _jsonOptions);
+            
+            if (manifest?.Bin != null)
+            {
+                RemoveGlobalBinLinks(manifest.Bin, globalBin, command.Package);
+            }
+        }
+        
+        // Remove package directory
+        Directory.Delete(packagePath, true);
+        
+        // Update global package list
+        await UpdateGlobalPackageList(command.Package, globalPath, cancellationToken);
+        
+        Console.WriteLine($"- {command.Package}");
+        Console.WriteLine($"removed from {globalPath}");
+        
+        return 0;
+    }
+    
+    private void RemoveGlobalBinLinks(object bin, string globalBin, string packageName)
+    {
+        if (bin is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.String)
+            {
+                // Single bin entry
+                RemoveBinLink(packageName, globalBin);
+            }
+            else if (element.ValueKind == JsonValueKind.Object)
+            {
+                // Multiple bin entries
+                foreach (var prop in element.EnumerateObject())
+                {
+                    RemoveBinLink(prop.Name, globalBin);
+                }
+            }
+        }
+        else if (bin is Dictionary<string, string> binDict)
+        {
+            foreach (var binName in binDict.Keys)
+            {
+                RemoveBinLink(binName, globalBin);
+            }
+        }
+    }
+    
+    private void RemoveBinLink(string binName, string globalBin)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var cmdPath = Path.Combine(globalBin, $"{binName}.cmd");
+            if (File.Exists(cmdPath))
+                File.Delete(cmdPath);
+            
+            var ps1Path = Path.Combine(globalBin, $"{binName}.ps1");
+            if (File.Exists(ps1Path))
+                File.Delete(ps1Path);
+        }
+        else
+        {
+            var binPath = Path.Combine(globalBin, binName);
+            if (File.Exists(binPath))
+                File.Delete(binPath);
+        }
+    }
+    
+    private async Task UpdateGlobalPackageList(string packageName, string globalPath, CancellationToken cancellationToken)
+    {
+        var listPath = Path.Combine(globalPath, "package.json");
+        
+        if (File.Exists(listPath))
+        {
+            var json = await File.ReadAllTextAsync(listPath, cancellationToken);
+            var globalManifest = JsonSerializer.Deserialize<PackageManifest>(json, _jsonOptions);
+            
+            if (globalManifest != null && globalManifest.Dependencies.ContainsKey(packageName))
+            {
+                globalManifest.Dependencies.Remove(packageName);
+                
+                var updatedJson = JsonSerializer.Serialize(globalManifest, _jsonOptions);
+                await File.WriteAllTextAsync(listPath, updatedJson, cancellationToken);
+            }
+        }
+    }
+    
+    private string GetGlobalPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "jio", "global");
+        }
+        else
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".jio", "global");
         }
     }
 }

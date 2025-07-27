@@ -8,4 +8,5 @@ public interface IPackageRegistry
     Task<IReadOnlyList<string>> GetPackageVersionsAsync(string name, CancellationToken cancellationToken = default);
     Task<Stream> DownloadPackageAsync(string name, string version, CancellationToken cancellationToken = default);
     Task<string> GetPackageIntegrityAsync(string name, string version, CancellationToken cancellationToken = default);
+    Task<PackageMetadata> GetPackageMetadataAsync(string name, CancellationToken cancellationToken = default);
 }

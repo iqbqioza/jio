@@ -4,6 +4,7 @@ using FluentAssertions;
 using Jio.Core.Configuration;
 using Jio.Core.Models;
 using Jio.Core.Registry;
+using Jio.Core.Cache;
 using Moq;
 using Moq.Protected;
 
@@ -24,7 +25,8 @@ public class NpmRegistryTests
         {
             Registry = "https://registry.npmjs.org/"
         };
-        _registry = new NpmRegistry(_httpClient, _configuration);
+        var mockCache = new Mock<IPackageCache>();
+        _registry = new NpmRegistry(_httpClient, _configuration, mockCache.Object);
     }
 
     [Fact]
@@ -97,12 +99,14 @@ public class NpmRegistryTests
         var packageName = "express";
         var version = "4.18.2";
         var tarballUrl = "https://registry.npmjs.org/express/-/express-4.18.2.tgz";
+        var integrity = "sha512-FN50kBqLrvxfT2SPBETQjccfWJNGJBBJuJ3e9QyJ4u3PTJl1N4OGNSx9geI1qBIsB5OQjLN2epCiI1HjGNNziRQ==";
         var manifestJson = $$"""
         {
           "name": "express",
           "version": "4.18.2",
           "dist": {
-            "tarball": "{{tarballUrl}}"
+            "tarball": "{{tarballUrl}}",
+            "integrity": "{{integrity}}"
           }
         }
         """;
@@ -181,7 +185,9 @@ public class NpmRegistryTests
         {
           "name": "express",
           "version": "4.18.2",
-          "dist": {}
+          "dist": {
+            "integrity": "sha512-FN50kBqLrvxfT2SPBETQjccfWJNGJBBJuJ3e9QyJ4u3PTJl1N4OGNSx9geI1qBIsB5OQjLN2epCiI1HjGNNziRQ=="
+          }
         }
         """;
 

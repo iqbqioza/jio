@@ -33,6 +33,20 @@ Fast, secure, and storage-efficient JavaScript package manager written in C#/.NE
 
 ## Installation
 
+### Quick Install
+
+#### Linux/macOS
+```bash
+curl -fsSL https://github.com/iqbqioza/jio/raw/main/cli/install.sh | bash
+```
+
+#### Windows
+```powershell
+powershell -c "irm https://github.com/iqbqioza/jio/raw/main/cli/install.ps1 | iex"
+```
+
+### Manual Installation
+
 Download the latest release for your platform from the [releases page](https://github.com/iqbqioza/jio/releases).
 
 ```bash
